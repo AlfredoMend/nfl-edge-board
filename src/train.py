@@ -32,6 +32,7 @@ BASES = ["logit", "xgb", "lgbm", "margin", "trees", "mlp", "elo"]
 BASE_LABELS = {"logit": "Logistic regression", "xgb": "XGBoost", "lgbm": "LightGBM",
                "margin": "Margin ridge regression", "trees": "Extra trees", "mlp": "Neural net",
                "elo": "Elo"}
+RECENCY_HALFLIFE = None  # seasons; None = all training seasons count equally
 HFA_GRID = np.round(np.arange(1.2, 1.81, 0.1), 2)   # home field, points
 SIGMA = 13.0            # SD of NFL margins around a good prediction
 COVER_SD = SIGMA
@@ -60,20 +61,26 @@ def mirror(df: pd.DataFrame) -> pd.DataFrame:
 def fit_bases(train: pd.DataFrame) -> dict:
     t = mirror(train)
     X, Xc, y = t[FEATURES], t[CORE_FEATURES], t.home_win
+    if RECENCY_HALFLIFE:
+        sw = 0.5 ** ((t.season.max() - t.season).to_numpy() / RECENCY_HALFLIFE)
+    else:
+        sw = np.ones(len(t))
     m = {}
-    m["logit"] = make_pipeline(StandardScaler(), LogisticRegression(C=0.05, max_iter=2000)).fit(Xc, y)
+    m["logit"] = make_pipeline(StandardScaler(), LogisticRegression(C=0.05, max_iter=2000)).fit(
+        Xc, y, logisticregression__sample_weight=sw)
     m["xgb"] = xgb.XGBClassifier(n_estimators=400, learning_rate=0.02, max_depth=3, min_child_weight=40,
                                  subsample=0.8, colsample_bytree=0.6, reg_lambda=10.0,
-                                 eval_metric="logloss", n_jobs=4).fit(X, y)
+                                 eval_metric="logloss", n_jobs=4).fit(X, y, sample_weight=sw)
     m["lgbm"] = lgb.LGBMClassifier(n_estimators=300, learning_rate=0.02, num_leaves=7, min_child_samples=120,
                                    subsample=0.8, subsample_freq=1, colsample_bytree=0.6, reg_lambda=5.0,
-                                   verbose=-1).fit(X, y)
-    r = make_pipeline(StandardScaler(), Ridge(alpha=300, fit_intercept=False)).fit(X, t.result)
+                                   verbose=-1).fit(X, y, sample_weight=sw)
+    r = make_pipeline(StandardScaler(), Ridge(alpha=300, fit_intercept=False)).fit(X, t.result, ridge__sample_weight=sw)
     m["margin"] = (r, float((t.result - r.predict(X)).std()))
     m["trees"] = ExtraTreesClassifier(n_estimators=400, min_samples_leaf=80, max_features=0.4,
-                                      n_jobs=-1, random_state=0).fit(X, y)
+                                      n_jobs=-1, random_state=0).fit(X, y, sample_weight=sw)
     m["mlp"] = make_pipeline(StandardScaler(), MLPClassifier(hidden_layer_sizes=(16,), alpha=3.0, max_iter=600,
-                                                             early_stopping=True, random_state=0)).fit(Xc, y)
+                                                             early_stopping=True, random_state=0)).fit(
+        Xc, y, mlpclassifier__sample_weight=sw)
     return m
 
 

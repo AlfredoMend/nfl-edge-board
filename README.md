@@ -36,15 +36,25 @@ Live site: https://alfredomend.github.io/nfl-edge-board/
 
 | | Model | Closing line |
 |---|---|---|
-| Win probability Brier | 0.2189 | 0.2112 |
-| Win probability log loss | 0.6270 | 0.6099 |
-| Straight-up picks correct | 64.4% | 66.5% |
-| Spread RMSE (points) | 13.26 | 12.94 |
-| Total RMSE (points) | 13.53 | 13.26 |
-| Against the spread | 49.9% (52.4% needed) | |
-| Over/under | 50.8% (52.4% needed) | |
+| Win probability Brier | 0.2175 | 0.2112 |
+| Win probability log loss | 0.6239 | 0.6099 |
+| Straight-up picks correct | 64.8% | 66.5% |
+| Spread RMSE (points) | 13.19 | 12.94 |
+| Total RMSE (points) | 13.50 | 13.26 |
+| Against the spread | 49.6% (52.4% needed) | |
+| Over/under | 50.6% (52.4% needed) | |
 
 Closing lines remain sharper, as expected. Closing line value against Kalshi is tracked from `data/clv_log.csv` as games are logged.
+
+## Hybrid choices (tested walk-forward, 2012 to now)
+
+The strict spec version scored a Brier of 0.2189. Three changes, each tested out of sample, brought it to 0.2175:
+
+- **Broad-window EPA added next to the neutral stats.** EPA per play, per pass, per rush and success rate over every play outside clear garbage time (win probability 5% to 95%, or the first half). The neutral 20% to 80% set is still used.
+- **QB rating from every dropback.** The quarterback signal is noisy, and more dropbacks per game outweigh the small game-script bias.
+- **Compact inputs for the linear models.** Logistic regression and the neural net use a 10-feature core (Elo, QB, opponent-adjusted EPA, broad EPA and success rate, rest). The tree models use every feature.
+
+Tested and rejected: a wider 10% to 90% neutral window, recency-weighted training, a looser QB prior, and a wider home-field range (no gain).
 
 ## Run locally
 

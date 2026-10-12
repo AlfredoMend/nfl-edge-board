@@ -36,7 +36,9 @@ RZ_PRIOR_TRIPS = 20       # red-zone trips of prior weight toward the league med
 # Per-game stats from data.py that get an EMA (offense and what the defense allowed)
 SIDE_STATS = ["epa", "sr", "pass_epa", "rush_epa", "early_epa", "explosive", "cpoe", "adot",
               "yac_tgt", "press_rate", "press_epa", "clean_epa", "twp_rate", "fum_rate", "ffum_rate"]
-EMA_COLS = [f"off_{s}" for s in SIDE_STATS] + [f"def_{s}" for s in SIDE_STATS] + ["plays_total"]
+BROAD_STATS = ["epa_all", "pass_epa_all", "rush_epa_all", "sr_all"]
+EMA_COLS = ([f"off_{s}" for s in SIDE_STATS] + [f"def_{s}" for s in SIDE_STATS] + ["plays_total"]
+            + [f"off_{s}" for s in BROAD_STATS] + [f"def_{s}" for s in BROAD_STATS])
 
 
 # ---------------------------------------------------------------- Elo
@@ -244,7 +246,7 @@ def build_features(g: pd.DataFrame, tg: pd.DataFrame, qg: pd.DataFrame) -> pd.Da
         away_net = g[f"away_adj_off_{k}"] + g[f"home_adj_def_{k}"]
         g[f"adj_{k}_diff"] = home_net - away_net
         g[f"adj_{k}_sum"] = home_net + away_net
-    for s in SIDE_STATS:
+    for s in SIDE_STATS + BROAD_STATS:
         g[f"d_off_{s}"] = g[f"home_f_off_{s}"] - g[f"away_f_off_{s}"]
         g[f"d_def_{s}"] = g[f"home_f_def_{s}"] - g[f"away_f_def_{s}"]
     g["d_rz_off"] = g.home_f_rz_off - g.away_f_rz_off
@@ -277,15 +279,17 @@ FEATURES = [
     "d_off_press_rate", "d_def_press_rate", "d_off_press_epa", "d_off_clean_epa", "d_def_clean_epa",
     "d_off_twp_rate", "d_def_twp_rate", "d_off_fum_rate", "d_def_ffum_rate",
     "d_rz_off", "d_rz_def", "qb_diff", "qb_iso_diff",
+    # hybrid: broad-window EPA (every play outside clear garbage time) alongside the neutral set
+    "d_off_epa_all", "d_def_epa_all", "d_off_pass_epa_all", "d_def_pass_epa_all",
+    "d_off_rush_epa_all", "d_def_rush_epa_all", "d_off_sr_all", "d_def_sr_all",
     "rest_diff", "travel_diff", "tz_shift_diff", "east_travel_diff",
     "high_wind", "extreme_cold", "div_game", "playoff", "early_season",
 ]
 # Features that describe the game, not one side. They do not flip when home and away swap.
 SYMMETRIC = {"high_wind", "extreme_cold", "div_game", "playoff", "early_season"}
-# Compact set for the linear models, which overfit the full list
-CORE_FEATURES = ["elo_diff", "adj_epa_diff", "adj_pass_diff", "adj_rush_diff", "qb_diff",
-                 "d_off_sr", "d_def_sr", "d_off_early_epa", "d_def_early_epa",
-                 "d_off_explosive", "d_def_explosive", "rest_diff", "travel_diff", "east_travel_diff"]
+# Compact set for the linear models, which overfit the full list (picked by walk-forward test)
+CORE_FEATURES = ["elo_diff", "qb_diff", "adj_epa_diff", "d_off_epa_all", "d_def_epa_all",
+                 "d_off_pass_epa_all", "d_def_pass_epa_all", "d_off_sr_all", "d_def_sr_all", "rest_diff"]
 
 TOTAL_FEATURES = [
     "adj_epa_sum", "adj_pass_sum", "adj_rush_sum", "sum_explosive", "sum_sr", "sum_pace",

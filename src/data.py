@@ -20,7 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 BASE = "https://github.com/nflverse/nflverse-data/releases/download"
 FIRST_SEASON = 2006
-CACHE_VERSION = 2  # bump when the aggregation changes so caches rebuild
+CACHE_VERSION = 4  # bump when the aggregation changes so caches rebuild
+NEUTRAL_WP = (0.20, 0.80)     # competitive-situation window
+NEUTRAL_Q3_MARGIN = 14        # or quarters 1-3 within this many points
+ALL_WP = (0.05, 0.95)         # wider window for the "all competitive plays" EPA set
 
 PBP_COLS = ["game_id", "posteam", "defteam", "epa", "success", "pass", "rush", "play_type",
             "wp", "qtr", "down", "score_differential", "id", "qb_dropback", "cpoe", "air_yards",
@@ -56,9 +59,21 @@ def load_pbp(season: int, refresh: bool = False) -> pd.DataFrame:
 
 def neutral(p: pd.DataFrame) -> pd.DataFrame:
     """Competitive-situation plays only."""
-    wp_ok = p.wp.between(0.20, 0.80)
-    close_early = (p.qtr <= 3) & (p.score_differential.abs() <= 14)
+    wp_ok = p.wp.between(*NEUTRAL_WP)
+    close_early = (p.qtr <= 3) & (p.score_differential.abs() <= NEUTRAL_Q3_MARGIN)
     return p[wp_ok | close_early]
+
+
+def broad(p: pd.DataFrame) -> pd.DataFrame:
+    """Every play except clear garbage time. More plays, a bit more game-script noise."""
+    return p[p.wp.between(*ALL_WP) | (p.qtr <= 2)]
+
+
+def _broad_epa(p: pd.DataFrame, side: str) -> pd.DataFrame:
+    q = p.assign(pass_epa=p.epa.where(p["pass"] == 1), rush_epa=p.epa.where(p["rush"] == 1))
+    return q.groupby(["game_id", side]).agg(
+        epa=("epa", "mean"), pass_epa=("pass_epa", "mean"), rush_epa=("rush_epa", "mean"),
+        sr=("success", "mean")).reset_index().rename(columns={side: "team"})
 
 
 def _side_stats(p: pd.DataFrame, side: str) -> pd.DataFrame:
@@ -109,14 +124,23 @@ def aggregate_season(season: int, refresh: bool = False) -> tuple[pd.DataFrame, 
     n = neutral(plays)
     off = _side_stats(n, "posteam").add_prefix("off_").rename(columns={"off_game_id": "game_id", "off_team": "team"})
     dfn = _side_stats(n, "defteam").add_prefix("def_").rename(columns={"def_game_id": "game_id", "def_team": "team"})
+    b = broad(plays)
+    boff = _broad_epa(b, "posteam").add_prefix("off_").add_suffix("_all").rename(
+        columns={"off_game_id_all": "game_id", "off_team_all": "team"})
+    bdef = _broad_epa(b, "defteam").add_prefix("def_").add_suffix("_all").rename(
+        columns={"def_game_id_all": "game_id", "def_team_all": "team"})
     pace = plays.groupby(["game_id", "posteam"]).size().rename("plays_total").reset_index().rename(columns={"posteam": "team"})
     tg = (off.merge(dfn, on=["game_id", "team"], how="outer")
              .merge(pace, on=["game_id", "team"], how="left")
-             .merge(_red_zone(raw), on=["game_id", "team"], how="left"))
+             .merge(_red_zone(raw), on=["game_id", "team"], how="left")
+             .merge(boff, on=["game_id", "team"], how="left")
+             .merge(bdef, on=["game_id", "team"], how="left"))
     tg[["rz_trips", "rz_tds"]] = tg[["rz_trips", "rz_tds"]].fillna(0)
     tg["season"] = season
 
-    db = n[(n.qb_dropback == 1) & n.id.notna()]
+    # QB ratings use every dropback (tested better than neutral-only: the QB signal is noisy,
+    # and more dropbacks per game outweigh the small game-script bias)
+    db = plays[(plays.qb_dropback == 1) & plays.id.notna()]
     qg = db.groupby(["game_id", "posteam", "id"]).agg(epa_sum=("epa", "sum"), dropbacks=("epa", "size"))
     qg = qg.reset_index().rename(columns={"posteam": "team", "id": "qb_id"})
     qg["season"] = season
@@ -127,7 +151,8 @@ def build_tables(current_season: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Reuse cached seasons and refresh only the current one."""
     tcache, qcache = DATA / "team_games.csv", DATA / "qb_games.csv"
     vfile = DATA / "cache_version.txt"
-    fresh = not vfile.exists() or vfile.read_text().strip() != str(CACHE_VERSION)
+    tag = f"{CACHE_VERSION}|{NEUTRAL_WP}|{NEUTRAL_Q3_MARGIN}|{ALL_WP}"
+    fresh = not vfile.exists() or vfile.read_text().strip() != tag
     th = pd.read_csv(tcache) if tcache.exists() and not fresh else pd.DataFrame()
     qh = pd.read_csv(qcache) if qcache.exists() and not fresh else pd.DataFrame()
     have = set(th.season.unique()) if len(th) else set()
@@ -143,7 +168,7 @@ def build_tables(current_season: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     qg = pd.concat(qf, ignore_index=True).sort_values(["season", "game_id"])
     tg.to_csv(tcache, index=False)
     qg.to_csv(qcache, index=False)
-    vfile.write_text(str(CACHE_VERSION))
+    vfile.write_text(tag)
     return tg, qg
 
 
