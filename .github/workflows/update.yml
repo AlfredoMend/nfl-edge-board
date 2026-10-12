@@ -51,7 +51,7 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add -A data site/data
           git diff --cached --quiet || git commit -m "Update predictions and prices"
-          git pull --rebase -q origin main && git push
+          git pull --rebase -X theirs -q origin main && git push
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
