@@ -6,8 +6,11 @@ from pathlib import Path
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize
 from scipy.stats import norm
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -16,6 +19,7 @@ from features import FEATURES
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "site" / "data"
 FIRST_TEST = 2012       # earlier seasons are training-only
+FIRST_OOF = 2009        # out-of-sample base predictions start here (to train the stacker)
 TRAIN_FROM = 2007       # 2006 has no prior-form history
 SPREAD_SD = 13.45       # NFL margin standard deviation vs the spread
 
@@ -34,22 +38,58 @@ def market_prob(df: pd.DataFrame) -> pd.Series:
     return pd.Series(np.where(np.isfinite(novig), novig, from_spread), index=df.index)
 
 
-def make_models():
-    logit = make_pipeline(StandardScaler(), LogisticRegression(C=0.1, max_iter=1000))
-    gbm = lgb.LGBMClassifier(n_estimators=300, learning_rate=0.02, num_leaves=7,
-                             min_child_samples=60, subsample=0.8, subsample_freq=1,
-                             colsample_bytree=0.8, reg_lambda=5.0, verbose=-1)
-    return logit, gbm
+BASES = ["logit", "gbm", "margin", "trees", "mlp", "elo"]
+BASE_LABELS = {"logit": "Logistic regression", "gbm": "LightGBM", "margin": "Margin regression",
+               "trees": "Extra trees", "mlp": "Neural net", "elo": "Elo"}
 
 
-def fit_predict(train, test):
-    logit, gbm = make_models()
-    X, y = train[FEATURES], train.home_win
-    logit.fit(X, y)
-    gbm.fit(X, y)
-    p_l = logit.predict_proba(test[FEATURES])[:, 1]
-    p_g = gbm.predict_proba(test[FEATURES])[:, 1]
-    return p_l, p_g, 0.5 * p_l + 0.5 * p_g
+def base_preds(train: pd.DataFrame, test: pd.DataFrame) -> dict:
+    """Six different models, each giving a home-win probability."""
+    X, y, Xt = train[FEATURES], train.home_win, test[FEATURES]
+    out = {}
+    m = make_pipeline(StandardScaler(), LogisticRegression(C=0.1, max_iter=1000)).fit(X, y)
+    out["logit"] = m.predict_proba(Xt)[:, 1]
+    m = lgb.LGBMClassifier(n_estimators=300, learning_rate=0.02, num_leaves=7, min_child_samples=60,
+                           subsample=0.8, subsample_freq=1, colsample_bytree=0.8, reg_lambda=5.0,
+                           verbose=-1).fit(X, y)
+    out["gbm"] = m.predict_proba(Xt)[:, 1]
+    # Predict the point margin, then turn it into a win probability.
+    r = make_pipeline(StandardScaler(), Ridge(alpha=10)).fit(X, train.result)
+    sd = float((train.result - r.predict(X)).std())
+    out["margin"] = norm.cdf(r.predict(Xt) / sd)
+    m = ExtraTreesClassifier(n_estimators=400, min_samples_leaf=40, max_features=0.5,
+                             n_jobs=-1, random_state=0).fit(X, y)
+    out["trees"] = m.predict_proba(Xt)[:, 1]
+    m = make_pipeline(StandardScaler(), MLPClassifier(hidden_layer_sizes=(16,), alpha=1.0, max_iter=500,
+                                                      early_stopping=True, random_state=0)).fit(X, y)
+    out["mlp"] = m.predict_proba(Xt)[:, 1]
+    out["elo"] = test.p_elo.to_numpy()
+    return out
+
+
+def _logit(p):
+    p = np.clip(np.asarray(p, dtype=float), 1e-4, 1 - 1e-4)
+    return np.log(p / (1 - p))
+
+
+def fit_stacker(oof: pd.DataFrame):
+    """Non-negative weights on the models (summing to 1) plus a calibration scale,
+    chosen to minimize log loss on out-of-sample predictions."""
+    Z = np.column_stack([_logit(oof[f"b_{b}"]) for b in BASES])
+    y = oof.home_win.to_numpy()
+
+    def loss(th):
+        w = np.exp(th[:-1]); w /= w.sum()
+        return logloss(1 / (1 + np.exp(-th[-1] * (Z @ w))), y)
+
+    th = minimize(loss, np.r_[np.zeros(len(BASES)), 1.0], method="L-BFGS-B").x
+    w = np.exp(th[:-1]); w /= w.sum()
+    return w, float(th[-1])
+
+
+def apply_stacker(df: pd.DataFrame, w, scale) -> np.ndarray:
+    Z = np.column_stack([_logit(df[f"b_{b}"]) for b in BASES])
+    return 1 / (1 + np.exp(-scale * (Z @ w)))
 
 
 def brier(p, y):
@@ -66,27 +106,40 @@ def payout_per_dollar(ml):
         return np.where(ml > 0, ml / 100, 100 / -ml)
 
 
-def backtest(f: pd.DataFrame, current_season: int) -> pd.DataFrame:
+def backtest(f: pd.DataFrame, current_season: int):
+    """Walk-forward: each season's base models train only on earlier seasons, and each
+    season's ensemble weights come only from earlier seasons' out-of-sample predictions."""
     done = f[f.home_win.notna() & (f.season >= TRAIN_FROM)].copy()
     rows = []
-    for s in range(FIRST_TEST, current_season + 1):
-        train = done[done.season < s]
+    for s in range(FIRST_OOF, current_season + 1):
         test = done[done.season == s].copy()
         if test.empty:
             continue
-        test["p_logit"], test["p_gbm"], test["p_model"] = fit_predict(train, test)
+        for k, v in base_preds(done[done.season < s], test).items():
+            test[f"b_{k}"] = v
         rows.append(test)
-    bt = pd.concat(rows)
+    oof = pd.concat(rows)
+    parts = []
+    for s in range(FIRST_TEST, current_season + 1):
+        te = oof[oof.season == s].copy()
+        if te.empty:
+            continue
+        w, a = fit_stacker(oof[oof.season < s])
+        te["p_model"] = apply_stacker(te, w, a)
+        parts.append(te)
+    bt = pd.concat(parts)
     bt["p_market"] = market_prob(bt)
-    return bt
+    weights, scale = fit_stacker(oof)  # used for this week's games
+    return bt, (weights, scale)
 
 
-def summarize(bt: pd.DataFrame, edge: float = 0.03) -> dict:
+def summarize(bt: pd.DataFrame, stack, edge: float = 0.03) -> dict:
     y = bt.home_win.to_numpy()
-    overall = {k: {"brier": brier(bt[c].to_numpy(), y), "logloss": logloss(bt[c].to_numpy(), y),
-                   "accuracy": float(np.mean((bt[c] > 0.5) == y))}
-               for k, c in [("model", "p_model"), ("logit", "p_logit"), ("gbm", "p_gbm"),
-                            ("vegas", "p_market"), ("elo_only", "p_elo")]}
+    score = lambda c: {"brier": brier(bt[c].to_numpy(), y), "logloss": logloss(bt[c].to_numpy(), y),
+                       "accuracy": float(np.mean((bt[c] > 0.5) == y))}
+    overall = {"model": score("p_model"), "vegas": score("p_market")}
+    members = [{"key": b, "name": BASE_LABELS[b], "weight": float(w), **score(f"b_{b}")}
+               for b, w in zip(BASES, stack[0])]
     by_season = []
     for s, d in bt.groupby("season"):
         yy = d.home_win.to_numpy()
@@ -115,7 +168,7 @@ def summarize(bt: pd.DataFrame, edge: float = 0.03) -> dict:
                "roi": float(pnl.sum() / n_bets) if n_bets else 0.0,
                "win_rate": float(((pnl > 0).sum()) / n_bets) if n_bets else 0.0,
                "seasons": f"{int(d.season.min())}-{int(d.season.max())}"}
-    return {"overall": overall, "by_season": by_season, "calibration": cal, "betting": betting,
+    return {"overall": overall, "members": members, "stack_scale": stack[1], "by_season": by_season, "calibration": cal, "betting": betting,
             "test_games": int(len(bt))}
 
 
@@ -125,7 +178,7 @@ def current_week(f: pd.DataFrame, season: int):
     return int(left.week.min()) if len(left) else None
 
 
-def week_games(f: pd.DataFrame, bt: pd.DataFrame, season: int) -> tuple[pd.DataFrame, int | None]:
+def week_games(f: pd.DataFrame, bt: pd.DataFrame, stack, season: int) -> tuple[pd.DataFrame, int | None]:
     """All games of the current week. Unplayed games get fresh predictions trained on
     everything played so far. Finished games keep the prediction made before kickoff."""
     week = current_week(f, season)
@@ -135,7 +188,9 @@ def week_games(f: pd.DataFrame, bt: pd.DataFrame, season: int) -> tuple[pd.DataF
     todo = wk[wk.result.isna()].copy()
     done = f[f.home_win.notna() & (f.season >= TRAIN_FROM)]
     if len(todo):
-        todo["p_logit"], todo["p_gbm"], todo["p_model"] = fit_predict(done, todo)
+        for k, v in base_preds(done, todo).items():
+            todo[f"b_{k}"] = v
+        todo["p_model"] = apply_stacker(todo, *stack)
         todo["p_market"] = market_prob(todo)
         todo["status"] = "upcoming"
     final = bt[(bt.season == season) & (bt.week == week)].copy()
@@ -146,14 +201,14 @@ def week_games(f: pd.DataFrame, bt: pd.DataFrame, season: int) -> tuple[pd.DataF
 def run(f: pd.DataFrame, current_season: int):
     f = f.copy()
     f["p_elo"] = 1 / (1 + 10 ** (-f.elo_diff / 400))
-    bt = backtest(f, current_season)
-    summary = summarize(bt)
-    fut, week = week_games(f, bt, current_season)
+    bt, stack = backtest(f, current_season)
+    summary = summarize(bt, stack)
+    fut, week = week_games(f, bt, stack, current_season)
 
     OUT.mkdir(parents=True, exist_ok=True)
     cols = ["game_id", "season", "week", "game_type", "gameday", "gametime", "away_team", "home_team",
-            "home_moneyline", "away_moneyline", "spread_line", "p_model", "p_logit", "p_gbm", "p_market",
-            "status", "home_score", "away_score", "home_win"]
+            "home_moneyline", "away_moneyline", "spread_line", "p_model", "p_market",
+            "status", "home_score", "away_score", "home_win"] + [f"b_{b}" for b in BASES]
     preds = fut[cols].copy() if len(fut) else pd.DataFrame(columns=cols)
     preds["gameday"] = preds.gameday.astype(str)
     meta = {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"),

@@ -46,6 +46,7 @@ h2{font-family:var(--display);font-weight:600;font-size:1.5rem;text-transform:up
 .pill{justify-self:start;font-size:.78rem;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--chip);color:var(--muted)}
 .pill.good{color:var(--good)} .pill.bad{color:var(--bad)}
 .game.final{opacity:.82}
+.range{font-size:.78rem;color:var(--muted)}
 .score{font-family:var(--mono);font-size:.95rem;font-variant-numeric:tabular-nums}
 .sublabel{font-family:var(--display);font-weight:600;font-size:1.05rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:20px 0 10px}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
@@ -76,7 +77,7 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
   <section>
     <h2 id="weekTitle">This week</h2>
     <div class="legend">
-      <span><i class="dot" style="background:var(--model)"></i>Model</span>
+      <span><i class="dot" style="background:var(--model)"></i>Ensemble model</span>
       <span><i class="dot" style="background:var(--vegas)"></i>Vegas (no-vig)</span>
       <span><i class="dot" style="background:var(--kalshi)"></i>Kalshi mid</span>
       <span>Track shows the home team's win chance</span>
@@ -90,6 +91,12 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
     <div class="tiles" id="tiles"></div>
   </section>
 
+  <section>
+    <h2>The ensemble</h2>
+    <p class="note" style="margin:0 0 12px">Six models each predict every game. Their weights are fit on out-of-sample predictions only, and a model gets zero weight when the others already cover what it knows.</p>
+    <div class="panel scroll" id="lineup"></div>
+  </section>
+
   <section class="charts">
     <div class="panel"><h3>Brier score by season</h3><p>Lower is better. Every season is predicted by a model trained only on earlier seasons.</p><div id="seasonChart"></div></div>
     <div class="panel"><h3>Calibration</h3><p>When the model says 70%, the home team should win about 70% of the time.</p><div id="calChart"></div></div>
@@ -97,7 +104,7 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
 
   <section>
     <h2>How it works</h2>
-    <p class="note">Data comes from nflverse play-by-play (2006 to now). Each game gets pregame-only features: Elo ratings, decayed offensive and defensive EPA per play and success rate, a quarterback rating built from the starter's dropback EPA, rest, and a few game flags. A logistic regression and a LightGBM model are averaged. A scheduled job refreshes data and predictions every week and snapshots Kalshi prices several times a day, logging them so the model can be graded against the exact prices that were available.</p>
+    <p class="note">Data comes from nflverse play-by-play (2006 to now). Each game gets pregame-only features: Elo ratings, decayed offensive and defensive EPA per play and success rate, a quarterback rating built from the starter's dropback EPA, rest, and a few game flags. Six models (logistic regression, LightGBM, a point-margin regression, extra trees, a small neural net, and Elo) are combined in a stacked ensemble. A scheduled job refreshes data and predictions every week and snapshots Kalshi prices several times a day, logging them so the model can be graded against the exact prices that were available.</p>
     <p class="note">Kalshi edge is the model's chance minus the ask price minus Kalshi's taker fee. Positive means the model thinks that contract is cheap. Paper results only.</p>
   </section>
 </div>
@@ -138,7 +145,14 @@ function gameCard(g, k) {
       <div class="num"><b style="color:var(--model)">${pct(g.p_model)}</b><span>Model</span></div>
       <div class="num"><b style="color:var(--vegas)">${pct(g.p_market)}</b><span>Vegas</span></div>
       <div class="num"><b style="color:var(--kalshi)">${pct(k && k.kalshi_home_mid)}</b><span>Kalshi</span></div>
-    </div>${pill}</article>`;
+    </div>${rangeLine(g)}${pill}</article>`;
+}
+
+const MEMBERS = ["logit", "gbm", "margin", "trees", "mlp", "elo"];
+function rangeLine(g) {
+  const v = MEMBERS.map(k => g["b_" + k]).filter(x => x != null && !isNaN(x));
+  if (!v.length) return "";
+  return `<div class="range">${v.length} models range ${pct(Math.min(...v))} to ${pct(Math.max(...v))} for ${esc(g.home_team)}</div>`;
 }
 
 function finalCard(g) {
@@ -197,13 +211,20 @@ function calChart(cal) {
   if (bt) {
     const o = bt.overall, b = bt.betting;
     document.getElementById("tiles").innerHTML = [
-      [o.model.brier.toFixed(4), "Model Brier score"],
+      [o.model.brier.toFixed(4), "Ensemble Brier score"],
       [o.vegas.brier.toFixed(4), "Vegas Brier score"],
-      [(o.model.accuracy * 100).toFixed(1) + "%", "Model picks correct"],
+      [(o.model.accuracy * 100).toFixed(1) + "%", "Ensemble picks correct"],
       [(o.vegas.accuracy * 100).toFixed(1) + "%", "Vegas favorite correct"],
       [(b.roi * 100).toFixed(1) + "%", `Paper ROI, ${b.bets.toLocaleString()} bets at ${b.edge_threshold * 100}%+ edge`]
     ].map(([v, l]) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`).join("") +
     `<p class="note" style="grid-column:1/-1;margin:0">${bt.test_games.toLocaleString()} games from ${bt.by_season[0].season} to ${bt.by_season.at(-1).season}, each predicted out of sample.</p>`;
+    if (bt.members) {
+      const rows = [...bt.members].sort((a, b) => b.weight - a.weight);
+      document.getElementById("lineup").innerHTML = `<table><thead><tr><th>Model</th><th class="n">Weight</th><th class="n">Brier</th><th class="n">Picks correct</th></tr></thead><tbody>` +
+        rows.map(m => `<tr><td>${esc(m.name)}</td><td class="n">${Math.round(m.weight * 100)}%</td><td class="n">${m.brier.toFixed(4)}</td><td class="n">${(m.accuracy * 100).toFixed(1)}%</td></tr>`).join("") +
+        `<tr><td><b>Ensemble</b></td><td class="n">100%</td><td class="n"><b>${o.model.brier.toFixed(4)}</b></td><td class="n"><b>${(o.model.accuracy * 100).toFixed(1)}%</b></td></tr>` +
+        `<tr><td>Vegas closing line</td><td class="n">–</td><td class="n">${o.vegas.brier.toFixed(4)}</td><td class="n">${(o.vegas.accuracy * 100).toFixed(1)}%</td></tr></tbody></table>`;
+    }
     document.getElementById("seasonChart").innerHTML = lineChart(bt.by_season);
     document.getElementById("calChart").innerHTML = calChart(bt.calibration);
   }

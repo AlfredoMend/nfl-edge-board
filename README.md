@@ -49,7 +49,7 @@ python -m http.server -d site # open http://localhost:8000
 - Starting QB rating: shrunk, decayed dropback EPA for the listed starter, so backups and rookies start near replacement level
 - QB change flag, rest difference, neutral site, division game, playoffs, early season
 
-**Models:** logistic regression and LightGBM, averaged.
+**Models:** a stacked ensemble of six models (logistic regression, LightGBM, point-margin ridge regression, extra trees, a small neural net, Elo). Weights are non-negative, sum to 1, and are fit only on earlier seasons' out-of-sample predictions.
 
 **Backtest:** walk-forward by season. Every season from 2012 on is predicted by a model trained only on earlier seasons, so all results are out of sample.
 
