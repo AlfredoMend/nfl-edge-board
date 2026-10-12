@@ -1,5 +1,6 @@
 """Full pipeline: data -> features -> walk-forward backtest -> this week's predictions -> site data."""
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -9,7 +10,9 @@ import pandas as pd
 import train as T
 from backtest import market_prob, summarize, walk_forward
 from data import build_tables, load_schedule
-from features import FEATURES, TOTAL_FEATURES, build_features
+from features import FEATURES, TOTAL_FEATURES, build_features, set_qb_priors
+from injuries import _get, BASE, build_injury_table, injury_notes
+from weather import fill_forecasts
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "site" / "data"
@@ -47,10 +50,15 @@ def predict_week(f, bt, oof, season):
 
 
 def main():
-    sched = load_schedule()
+    refresh = "--refresh" in sys.argv
+    sched = fill_forecasts(load_schedule())
     season = int(sched.season.max())
     tg, qg = build_tables(season)
-    f = build_features(sched, tg, qg)
+    players = pd.read_parquet(_get("players.parquet", f"{BASE}/players/players.parquet", refresh),
+                              columns=["gsis_id", "position", "draft_round", "rookie_season"])
+    set_qb_priors(players)
+    inj = build_injury_table(sched, refresh=refresh)
+    f = build_features(sched, tg, qg, inj)
 
     bt, oof, hfa_by_season = walk_forward(f, season)
     week_df, week, info = predict_week(f, bt, oof, season)
@@ -60,7 +68,9 @@ def main():
     cols = ["game_id", "season", "week", "game_type", "gameday", "gametime", "away_team", "home_team",
             "home_moneyline", "away_moneyline", "spread_line", "total_line", "p_model", "p_market",
             "status", "home_score", "away_score", "home_win", "pred_margin", "p_home_cover",
-            "pred_total", "pred_home_pts", "pred_away_pts"] + [f"b_{b}" for b in T.BASES]
+            "pred_total", "pred_home_pts", "pred_away_pts", "temp", "wind", "weather_source", "roof",
+            "home_qb_name", "away_qb_name", "d_inj_off", "d_inj_def",
+            "home_inj_off_total", "away_inj_off_total", "home_inj_def_total", "away_inj_def_total"] + [f"b_{b}" for b in T.BASES]
     preds = week_df[cols].copy() if len(week_df) else pd.DataFrame(columns=cols)
     preds["gameday"] = preds.gameday.astype(str)
 
@@ -69,6 +79,8 @@ def main():
             "week": week, "features": FEATURES, "total_features": TOTAL_FEATURES,
             "hfa_points": stack[2], "sigma": T.SIGMA, "cover_sd": T.COVER_SD}
     (OUT / "predictions.json").write_text(preds.to_json(orient="records"))
+    notes = injury_notes(sched, season, week) if week else {}
+    (OUT / "injuries.json").write_text(json.dumps(notes))
     (OUT / "backtest.json").write_text(json.dumps(summary, indent=1))
     (OUT / "meta.json").write_text(json.dumps(meta))
     bt.to_csv(ROOT / "data" / "backtest_games.csv", index=False)

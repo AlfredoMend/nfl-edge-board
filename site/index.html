@@ -47,6 +47,9 @@ h2{font-family:var(--display);font-weight:600;font-size:1.5rem;text-transform:up
 .pill.good{color:var(--good)} .pill.bad{color:var(--bad)}
 .game.final{opacity:.82}
 .range{font-size:.78rem;color:var(--muted)}
+.ctx{display:grid;gap:3px;font-size:.8rem;color:var(--muted)}
+.ctx b{color:var(--ink);font-weight:500}
+.ctx .out{color:var(--bad)}
 .pick{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;background:var(--chip);border-radius:8px;padding:8px 10px}
 .pick .who{font-family:var(--display);font-weight:800;font-size:1.25rem;letter-spacing:.03em;text-transform:uppercase}
 .pick .who em{font-style:normal;color:var(--model)}
@@ -112,7 +115,7 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
 
   <section>
     <h2>How it works</h2>
-    <p class="note">Data comes from nflverse play-by-play (2006 to now). Team stats only count plays in competitive situations (win probability 20 to 80%, or the first three quarters within 14 points), so garbage time does not distort them. No yards per game, points per game or raw turnover counts are used. Features include opponent-adjusted EPA per pass and rush (a weekly ridge regression on offense and defense), success rate, early-down EPA, explosive play rate, CPOE, depth of target, yards after catch per target, pressure rate and EPA under pressure, turnover-worthy pass and fumble rates, red-zone touchdown rate regressed to the league median, a starting quarterback rating and how it compares to his team, rest, travel miles, time-zone shifts, wind and cold. Recent games count more through a 7-game exponential moving average.</p>
+    <p class="note">Data comes from nflverse play-by-play (2006 to now). Team stats only count plays in competitive situations (win probability 20 to 80%, or the first three quarters within 14 points), so garbage time does not distort them. No yards per game, points per game or raw turnover counts are used. Features include opponent-adjusted EPA per pass and rush (a weekly ridge regression on offense and defense), success rate, early-down EPA, explosive play rate, CPOE, depth of target, yards after catch per target, pressure rate and EPA under pressure, turnover-worthy pass and fumble rates, red-zone touchdown rate regressed to the league median, a starting quarterback rating and how it compares to his team, rest, travel miles, time-zone shifts, wind and cold. Recent games count more through a 7-game exponential moving average. Injuries count each player listed Out or Doubtful by his recent share of snaps, so a starting tackle matters and a backup does not. Backup and rookie quarterbacks start from a rating based on where they were drafted. Outdoor games get a kickoff weather forecast.</p>
     <p class="note">The models learn neutral-site team strength, then home field is added back as a fixed 1.2 to 1.8 points. Every season in the backtest is predicted only from earlier seasons and scored against sportsbook closing lines.</p>
     <p class="note">Projected scores come from a separate total-points model built on each team's recent scoring, efficiency and quarterback play, split between the teams using the predicted margin.</p>
     <p class="note">The predicted margin comes from the ensemble's win probability, scaled to points using past games. Spread contracts on Kalshi are priced the same way: the chance a team wins by more than the line, compared to the ask price after fees.</p>
@@ -154,6 +157,28 @@ function pickBox(g, label) {
     <div class="proj">${pct(pickProb(g))} to win${g.pred_home_pts != null ? " · " + projScore(g) : ""}</div></div>`;
 }
 
+let INJ = {};
+function absences(team) {
+  const list = (INJ[team] || []).filter(p => p.status !== "Questionable" || p.share >= 0.6).slice(0, 4);
+  if (!list.length) return "none listed";
+  return list.map(p => `<span class="${p.status === "Questionable" ? "" : "out"}">${esc(p.name)} (${esc(p.pos)}, ${esc(p.status === "Questionable" ? "Q" : p.status)})</span>`).join(", ");
+}
+function weatherLine(g) {
+  if (g.roof === "dome" || g.roof === "closed" || g.roof == null) return "Indoors";
+  if (g.wind == null) return "Outdoors, forecast not available yet";
+  const src = g.weather_source === "forecast" ? "forecast" : "observed";
+  const flags = [g.wind > 15 ? "high wind" : null, g.temp < 25 ? "extreme cold" : null].filter(Boolean);
+  return `${Math.round(g.temp)}°F, wind ${Math.round(g.wind)} mph (${src})${flags.length ? " · " + flags.join(", ") : ""}`;
+}
+function contextBlock(g) {
+  return `<div class="ctx">
+    <div>QBs: <b>${esc(g.away_qb_name || "TBD")}</b> vs <b>${esc(g.home_qb_name || "TBD")}</b></div>
+    <div>Weather: ${esc(weatherLine(g))}</div>
+    <div>${esc(g.away_team)} out: ${absences(g.away_team)}</div>
+    <div>${esc(g.home_team)} out: ${absences(g.home_team)}</div>
+  </div>`;
+}
+
 function gameCard(g, k) {
   const marks = [["var(--vegas)", g.p_market], ["var(--kalshi)", k && k.kalshi_home_mid], ["var(--model)", g.p_model]]
     .filter(m => m[1] != null && !isNaN(m[1]))
@@ -175,7 +200,7 @@ function gameCard(g, k) {
       <div class="num"><b style="color:var(--model)">${pct(g.p_model)}</b><span>Model</span></div>
       <div class="num"><b style="color:var(--vegas)">${pct(g.p_market)}</b><span>Vegas</span></div>
       <div class="num"><b style="color:var(--kalshi)">${pct(k && k.kalshi_home_mid)}</b><span>Kalshi</span></div>
-    </div>${rangeLine(g)}${pill}${spreadBlock(g, k)}</article>`;
+    </div>${contextBlock(g)}${rangeLine(g)}${pill}${spreadBlock(g, k)}</article>`;
 }
 
 function fmtLine(team, n) { return `${team} ${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n) === 0 ? "PK" : Math.abs(n)}`; }
@@ -264,8 +289,9 @@ function calChart(cal) {
 }
 
 (async () => {
-  const [preds, bt, meta, kal] = await Promise.all([
-    load("predictions", []), load("backtest", null), load("meta", {}), load("kalshi_latest", {games: []})]);
+  const [preds, bt, meta, kal, inj] = await Promise.all([
+    load("predictions", []), load("backtest", null), load("meta", {}), load("kalshi_latest", {games: []}), load("injuries", {})]);
+  INJ = inj || {};
   const kmap = Object.fromEntries((kal.games || []).map(k => [k.game_id, k]));
   document.getElementById("meta").innerHTML =
     `<span>Model updated ${esc((meta.updated || "").replace("T", " ").replace("+00:00", " UTC"))}</span>` +

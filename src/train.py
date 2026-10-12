@@ -66,15 +66,17 @@ def fit_bases(train: pd.DataFrame) -> dict:
     else:
         sw = np.ones(len(t))
     m = {}
-    m["logit"] = make_pipeline(StandardScaler(), LogisticRegression(C=0.05, max_iter=2000)).fit(
+    m["logit"] = make_pipeline(StandardScaler(), LogisticRegression(C=0.02, max_iter=3000)).fit(
         Xc, y, logisticregression__sample_weight=sw)
-    m["xgb"] = xgb.XGBClassifier(n_estimators=400, learning_rate=0.02, max_depth=3, min_child_weight=40,
-                                 subsample=0.8, colsample_bytree=0.6, reg_lambda=10.0,
+    # Settings below were tuned on held-out seasons (2012 on, walk-forward). Shallow trees won:
+    # the signal is mostly additive, so depth-1 XGBoost beat deeper trees.
+    m["xgb"] = xgb.XGBClassifier(n_estimators=1000, learning_rate=0.01, max_depth=1, min_child_weight=60,
+                                 subsample=0.8, colsample_bytree=0.8, reg_lambda=10.0,
                                  eval_metric="logloss", n_jobs=4).fit(X, y, sample_weight=sw)
-    m["lgbm"] = lgb.LGBMClassifier(n_estimators=300, learning_rate=0.02, num_leaves=7, min_child_samples=120,
-                                   subsample=0.8, subsample_freq=1, colsample_bytree=0.6, reg_lambda=5.0,
+    m["lgbm"] = lgb.LGBMClassifier(n_estimators=500, learning_rate=0.02, num_leaves=3, min_child_samples=300,
+                                   subsample=0.8, subsample_freq=1, colsample_bytree=0.5, reg_lambda=5.0,
                                    verbose=-1).fit(X, y, sample_weight=sw)
-    r = make_pipeline(StandardScaler(), Ridge(alpha=300, fit_intercept=False)).fit(X, t.result, ridge__sample_weight=sw)
+    r = make_pipeline(StandardScaler(), Ridge(alpha=1000, fit_intercept=False)).fit(X, t.result, ridge__sample_weight=sw)
     m["margin"] = (r, float((t.result - r.predict(X)).std()))
     m["trees"] = ExtraTreesClassifier(n_estimators=400, min_samples_leaf=80, max_features=0.4,
                                       n_jobs=-1, random_state=0).fit(X, y, sample_weight=sw)

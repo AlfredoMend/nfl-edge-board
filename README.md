@@ -10,6 +10,8 @@ Live site: https://alfredomend.github.io/nfl-edge-board/
 |---|---|
 | `src/data.py` | Downloads nflfastR play-by-play and schedules (nflverse releases), applies the situation-neutral filter, aggregates per team per game |
 | `src/features.py` | Exponential moving averages, opponent adjustment, red-zone regression, QB isolation, rest, travel, weather |
+| `src/injuries.py` | Official injury reports weighted by each player's recent snap share, by position group |
+| `src/weather.py` | Kickoff forecasts for upcoming outdoor games (Open-Meteo) |
 | `src/geo.py` | Stadium coordinates and time zones for travel and body-clock features |
 | `src/train.py` | Base models (logistic, XGBoost, LightGBM, ridge, extra trees, neural net, Elo), neutral-site stacking, home field, totals |
 | `src/backtest.py` | Walk-forward time-series evaluation against closing lines, closing line value on Kalshi |
@@ -36,13 +38,13 @@ Live site: https://alfredomend.github.io/nfl-edge-board/
 
 | | Model | Closing line |
 |---|---|---|
-| Win probability Brier | 0.2175 | 0.2112 |
-| Win probability log loss | 0.6239 | 0.6099 |
-| Straight-up picks correct | 64.8% | 66.5% |
+| Win probability Brier | 0.2168 | 0.2112 |
+| Win probability log loss | 0.6224 | 0.6099 |
+| Straight-up picks correct | 65.2% | 66.5% |
 | Spread RMSE (points) | 13.19 | 12.94 |
-| Total RMSE (points) | 13.50 | 13.26 |
-| Against the spread | 49.6% (52.4% needed) | |
-| Over/under | 50.6% (52.4% needed) | |
+| Total RMSE (points) | 13.48 | 13.26 |
+| Against the spread | 49.2% (52.4% needed) | |
+| Over/under | 51.3% (52.4% needed) | |
 
 Closing lines remain sharper, as expected. Closing line value against Kalshi is tracked from `data/clv_log.csv` as games are logged.
 
@@ -55,6 +57,19 @@ The strict spec version scored a Brier of 0.2189. Three changes, each tested out
 - **Compact inputs for the linear models.** Logistic regression and the neural net use a 10-feature core (Elo, QB, opponent-adjusted EPA, broad EPA and success rate, rest). The tree models use every feature.
 
 Tested and rejected: a wider 10% to 90% neutral window, recency-weighted training, a looser QB prior, and a wider home-field range (no gain).
+
+## Accuracy upgrades (tested walk-forward, kept only if they helped)
+
+| Change | Brier |
+|---|---|
+| Hybrid model before these upgrades | 0.2175 |
+| + Injuries: Out/Doubtful players weighted by recent snap share (tree models get each position group, linear models get offense and defense totals) | 0.2172 |
+| + Backup and rookie QB priors from draft slot (estimated from 2006-2011 rookies only) | 0.2171 |
+| + Tuned model settings: depth-1 XGBoost, simpler LightGBM, lighter logistic regularization, stronger ridge | **0.2168** |
+
+Also added for live games, which the backtest cannot measure: kickoff weather forecasts (nflverse only records weather after a game) and correct handling of retractable roofs, which have no roof value before kickoff.
+
+Tested and not kept: 10 mph wind threshold, injury position groups in the linear models, different offseason carryover for Elo, team form and QB ratings, recency-weighted training.
 
 ## Run locally
 

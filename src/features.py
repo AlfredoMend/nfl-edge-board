@@ -18,6 +18,7 @@ from sklearn.linear_model import Ridge
 warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
 
 from geo import travel
+from injuries import INJURY_FEATURES, add_injuries
 
 EMA_HALFLIFE = 7          # games
 CARRYOVER = 0.5           # share of last season's form kept at a new season
@@ -32,6 +33,8 @@ ELO_REGRESS = 1 / 3
 OPP_ADJ_HALFLIFE = 7      # weeks
 OPP_ADJ_ALPHA = 150.0     # ridge shrinkage, in weighted plays
 RZ_PRIOR_TRIPS = 20       # red-zone trips of prior weight toward the league median
+WIND_MPH = 15             # sustained wind above this counts as high wind
+COLD_F = 25
 
 # Per-game stats from data.py that get an EMA (offense and what the defense allowed)
 SIDE_STATS = ["epa", "sr", "pass_epa", "rush_epa", "early_epa", "explosive", "cpoe", "adot",
@@ -166,9 +169,22 @@ def opponent_adjusted(long: pd.DataFrame) -> pd.DataFrame:
 
 # ---------------------------------------------------------------- quarterbacks
 QB_PRIOR = -0.05
+# Priors by draft slot, from rookies' first 300 dropbacks in 2006-2011 (before any backtest season)
+QB_DRAFT_PRIORS = {"r1": -0.08, "r2-3": -0.15, "r4+": -0.13, "undrafted": -0.19}
+QB_PRIOR_BY_ID: dict = {}   # filled by set_qb_priors(); empty = flat QB_PRIOR for everyone
 QB_SHRINK = 200
 QB_HALFLIFE = 600
 QB_CARRYOVER = 0.75
+
+
+def set_qb_priors(players: pd.DataFrame, min_rookie_season: int = 2006) -> None:
+    """Draft-based prior for QBs who entered the league in our data window. Veterans who
+    started before it keep the flat prior (they have plenty of dropbacks anyway)."""
+    p = players[(players.position == "QB") & (players.rookie_season >= min_rookie_season)]
+    rnd = p.draft_round
+    bucket = np.select([rnd == 1, rnd.isin([2, 3]), rnd >= 4], ["r1", "r2-3", "r4+"], "undrafted")
+    QB_PRIOR_BY_ID.clear()
+    QB_PRIOR_BY_ID.update({k: QB_DRAFT_PRIORS[b] for k, b in zip(p.gsis_id, bucket)})
 
 
 def add_qb_ratings(g: pd.DataFrame, qg: pd.DataFrame) -> pd.DataFrame:
@@ -185,7 +201,8 @@ def add_qb_ratings(g: pd.DataFrame, qg: pd.DataFrame) -> pd.DataFrame:
                 N[qb] *= QB_CARRYOVER
                 last[qb] = row.season
             s, n = S.get(qb, 0.0), N.get(qb, 0.0)
-            r = (s + QB_SHRINK * QB_PRIOR) / (n + QB_SHRINK) if isinstance(qb, str) else QB_PRIOR
+            prior = QB_PRIOR_BY_ID.get(qb, QB_PRIOR)
+            r = (s + QB_SHRINK * prior) / (n + QB_SHRINK) if isinstance(qb, str) else QB_PRIOR
             (home_r if side == "h" else away_r).append(r)
         d = by_game.get(row.game_id)
         if d is None:
@@ -214,18 +231,19 @@ def add_context(g: pd.DataFrame) -> pd.DataFrame:
     g["tz_shift_diff"] = g.away_tz_shift.abs() - g.home_tz_shift.abs()
     # traveling east means the body clock runs behind local time
     g["east_travel_diff"] = (g.away_tz_shift > 0).astype(int) - (g.home_tz_shift > 0).astype(int)
-    outdoor = ~g.roof.isin(["dome", "closed"])
+    # Retractable roofs have no roof value before kickoff; they are closed ~89% of the time
+    outdoor = g.roof.isin(["outdoors", "open"])
     g["indoor"] = (~outdoor).astype(int)
     g["wind_mph"] = np.where(outdoor, g.wind.fillna(0), 0)
-    g["high_wind"] = (g.wind_mph > 15).astype(int)
-    g["extreme_cold"] = (outdoor & (g.temp < 25)).astype(int)
+    g["high_wind"] = (g.wind_mph > WIND_MPH).astype(int)
+    g["extreme_cold"] = (outdoor & (g.temp < COLD_F)).astype(int)
     g["div_game"] = g.div_game.fillna(0)
     g["playoff"] = (g.game_type != "REG").astype(int)
     return g
 
 
 # ---------------------------------------------------------------- assemble
-def build_features(g: pd.DataFrame, tg: pd.DataFrame, qg: pd.DataFrame) -> pd.DataFrame:
+def build_features(g: pd.DataFrame, tg: pd.DataFrame, qg: pd.DataFrame, inj: pd.DataFrame = None) -> pd.DataFrame:
     g = add_elo(g)
     g = add_qb_ratings(g, qg)
     g = add_context(g)
@@ -269,6 +287,11 @@ def build_features(g: pd.DataFrame, tg: pd.DataFrame, qg: pd.DataFrame) -> pd.Da
     g["sum_rz"] = g.home_f_rz_off + g.away_f_rz_off + g.home_f_rz_def + g.away_f_rz_def
     g["sum_twp"] = g.home_f_off_twp_rate + g.away_f_off_twp_rate
     g["season_trend"] = g.season - 2015
+    if inj is not None:
+        g = add_injuries(g, inj)
+    else:
+        for c in INJURY_FEATURES:
+            g[c] = 0.0
     return g
 
 
@@ -284,12 +307,13 @@ FEATURES = [
     "d_off_rush_epa_all", "d_def_rush_epa_all", "d_off_sr_all", "d_def_sr_all",
     "rest_diff", "travel_diff", "tz_shift_diff", "east_travel_diff",
     "high_wind", "extreme_cold", "div_game", "playoff", "early_season",
-]
+] + INJURY_FEATURES
 # Features that describe the game, not one side. They do not flip when home and away swap.
 SYMMETRIC = {"high_wind", "extreme_cold", "div_game", "playoff", "early_season"}
 # Compact set for the linear models, which overfit the full list (picked by walk-forward test)
 CORE_FEATURES = ["elo_diff", "qb_diff", "adj_epa_diff", "d_off_epa_all", "d_def_epa_all",
-                 "d_off_pass_epa_all", "d_def_pass_epa_all", "d_off_sr_all", "d_def_sr_all", "rest_diff"]
+                 "d_off_pass_epa_all", "d_def_pass_epa_all", "d_off_sr_all", "d_def_sr_all", "rest_diff",
+                 "d_inj_off", "d_inj_def"]
 
 TOTAL_FEATURES = [
     "adj_epa_sum", "adj_pass_sum", "adj_rush_sum", "sum_explosive", "sum_sr", "sum_pace",
