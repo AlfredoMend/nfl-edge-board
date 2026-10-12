@@ -318,6 +318,13 @@ def simulate_team(rng, team_pts, team_margin, prof, defense, players, vol, lg):
     return res, team
 
 
+DIST_Q = np.linspace(0, 100, 101)   # percentiles kept for pricing threshold markets ("70+ yards")
+
+
+def _quant(x):
+    return [round(float(v), 1) for v in np.percentile(x, DIST_Q)]
+
+
 def _summ(x, lo=25, hi=75):
     return {"median": float(np.median(x)), "p25": float(np.percentile(x, lo)), "p75": float(np.percentile(x, hi))}
 
@@ -340,7 +347,16 @@ def simulate_game(game: dict, home: dict, away: dict, vol: dict, lg: dict, n: in
                    "rec": _summ(r["rec"]), "rec_yds": _summ(r["rec_yds"]), "targets": _summ(r["targets"]),
                    "rush_att": _summ(r["carries"]), "rush_yds": _summ(r["rush_yds"]),
                    "rush_rec_yds": _summ(r["rush_yds"] + r["rec_yds"])}
+            row["dist"] = {"rec": _quant(r["rec"]), "rec_yds": _quant(r["rec_yds"]),
+                           "rush_att": _quant(r["carries"]), "rush_yds": _quant(r["rush_yds"]),
+                           "rush_rec_yds": _quant(r["rush_yds"] + r["rec_yds"])}
+            tds = r["rec_td"] + r["rush_td"]
+            row["td_2plus"] = float((tds >= 2).mean())
+            row["first_td_share"] = None
             if "pass_yds" in r:
+                row["dist"].update({"pass_yds": _quant(r["pass_yds"]), "pass_td": _quant(r["pass_td"]),
+                                    "comp": _quant(r["comp"]), "pass_att": _quant(r["pass_att"]),
+                                    "pass_rush_yds": _quant(r["pass_yds"] + r["rush_yds"]), "ints": _quant(r["ints"])})
                 row.update({"pass_att": _summ(r["pass_att"]), "comp": _summ(r["comp"]), "pass_yds": _summ(r["pass_yds"]),
                             "pass_td": _summ(r["pass_td"]), "ints": _summ(r["ints"]),
                             "pass_td_2plus": float((r["pass_td"] >= 2).mean()),

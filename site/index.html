@@ -143,6 +143,12 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
     <div id="finals"></div>
   </section>
 
+  <section id="kpropsSec" hidden>
+    <h2>Kalshi prop edges</h2>
+    <p class="note" style="margin:0 0 12px" id="kpropsNote"></p>
+    <div class="panel scroll" id="kprops"></div>
+  </section>
+
   <section>
     <h2>Track record vs the market</h2>
     <div class="tiles" id="tiles"></div>
@@ -402,7 +408,28 @@ function propsTab(g) {
       recv.map(p => `<tr>${nm(p)}${cell(p.rec_yds, 1)}${cell(p.rec)}${cell(p.targets)}${td(p)}</tr>`).join(""))}
     <h3 class="sublabel" style="margin:4px 0 0">Touchdown scorers</h3>
     ${tbl(`<th>Player</th><th class="n">Anytime TD</th><th class="n">Fair odds</th>`,
-      tdl.map(p => `<tr>${nm(p)}${td(p)}<td class="n">${americanOdds(p.anytime_td)}</td></tr>`).join(""))}</div>`;
+      tdl.map(p => `<tr>${nm(p)}${td(p)}<td class="n">${americanOdds(p.anytime_td)}</td></tr>`).join(""))}
+    ${kalshiForGame(g, team)}</div>`;
+}
+let KPROPS = {markets: []};
+const cents = v => v == null ? "–" : Math.round(v * 100) + "¢";
+const evTxt = v => v == null ? "–" : (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(1) + "¢";
+function kpropRows(list, withGame) {
+  return list.map(m => `<tr>
+    ${withGame ? `<td>${esc((GAMES[m.game_id] || {}).away_team || "")} at ${esc((GAMES[m.game_id] || {}).home_team || "")}</td>` : ""}
+    <td>${esc(m.contract)}${m.protected ? ' <small style="color:var(--muted)">protected</small>' : ""}</td>
+    <td class="n">${pct(m.model_p)}</td><td class="n">${cents(m.yes_ask)}</td><td class="n">${cents(m.no_ask)}</td>
+    <td class="n"><b class="${m.best_ev > 0 ? "ok" : "no"}">Buy ${m.best_side} ${evTxt(m.best_ev)}</b>${m.wide ? ' <small style="color:var(--muted)">thin</small>' : ""}</td></tr>`).join("");
+}
+function kpropTable(list, withGame) {
+  return `<table><thead><tr>${withGame ? "<th>Game</th>" : ""}<th>Contract (YES = player reaches it)</th><th class="n">Model</th><th class="n">YES ask</th><th class="n">NO ask</th><th class="n">Best play, value per contract</th></tr></thead><tbody>${kpropRows(list, withGame)}</tbody></table>`;
+}
+function kalshiForGame(g, team) {
+  const list = (KPROPS.markets || []).filter(m => m.game_id === g.game_id && m.team === team);
+  if (!list.length) return `<h3 class="sublabel" style="margin:4px 0 0">Kalshi prices</h3><p class="note" style="margin:0">No Kalshi prop markets matched for ${esc(team)} yet.</p>`;
+  return `<h3 class="sublabel" style="margin:4px 0 0">Kalshi prices</h3>
+    <p class="note" style="margin:0">Model chance of YES vs Kalshi's asks. Value is after Kalshi's taker fee, per $1 contract. Thin means a wide bid-ask spread.</p>
+    <div class="panel scroll">${kpropTable(list, false)}</div>`;
 }
 function americanOdds(p) {
   if (!p || p <= 0 || p >= 1) return "–";
@@ -482,9 +509,9 @@ function calChart(cal) {
 }
 
 (async () => {
-  const [preds, bt, meta, kal, inj, props, ts] = await Promise.all([
+  const [preds, bt, meta, kal, inj, props, ts, kp] = await Promise.all([
     load("predictions", []), load("backtest", null), load("meta", {}), load("kalshi_latest", {games: []}), load("injuries", {}),
-    load("props", {}), load("teamstats", null)]);
+    load("props", {}), load("teamstats", null), load("kalshi_props", {markets: []})]);
   INJ = inj || {}; PROPS = props || {}; TSTATS = ts;
   GAMES = Object.fromEntries(preds.map(g => [g.game_id, g]));
   const kmap = Object.fromEntries((kal.games || []).map(k => [k.game_id, k]));
@@ -525,6 +552,13 @@ function calChart(cal) {
     }
     document.getElementById("seasonChart").innerHTML = lineChart(bt.by_season);
     document.getElementById("calChart").innerHTML = calChart(bt.calibration);
+  }
+  KPROPS = kp || {markets: []};
+  const top = (KPROPS.markets || []).filter(x => x.best_ev >= (KPROPS.min_edge || 0.03) && !x.wide).slice(0, 15);
+  if ((KPROPS.markets || []).length) {
+    document.getElementById("kpropsSec").hidden = false;
+    document.getElementById("kpropsNote").textContent = `Every open Kalshi player prop on an upcoming game, priced with the model's 10,000 simulations. Showing the ${top.length} contracts with at least ${Math.round((KPROPS.min_edge || 0.03) * 100)}¢ of value after fees and a tight market. Checked ${(KPROPS.updated || "").replace("T", " ").replace("+00:00", " UTC")}. Large gaps usually mean the market knows something the model does not, so treat these as leads, not locks.`;
+    document.getElementById("kprops").innerHTML = top.length ? kpropTable(top, true) : `<p class="empty">No contracts clear the bar right now.</p>`;
   }
   const m = location.hash.match(/^#g-([A-Za-z0-9_]+)$/);
   if (m && GAMES[m[1]]) openGame(m[1]);

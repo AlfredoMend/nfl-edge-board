@@ -41,9 +41,9 @@ jobs:
         continue-on-error: true
         run: python src/kalshi.py
 
-      - name: Discover Kalshi player-prop markets
+      - name: Price Kalshi player props
         continue-on-error: true
-        run: python src/kalshi_discover.py
+        run: python src/kalshi_props.py
 
       - name: Commit updated data
         run: |
