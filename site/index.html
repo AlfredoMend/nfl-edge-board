@@ -1,0 +1,201 @@
+<title>NFL Edge Board</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column scoreboard. Slate of games first, then how the model has held up against the market. */
+:root{
+  --bg:#F3F5F1; --surface:#FFFFFF; --ink:#16201A; --muted:#5E6A62; --line:#D9DED7;
+  --model:#C2410C; --vegas:#3B5B7A; --kalshi:#0F766E; --good:#15803D; --bad:#B91C1C; --chip:#E8ECE5;
+  --display:"Saira Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F1612; --surface:#17211B; --ink:#E7EDE8; --muted:#97A49B; --line:#2A3830;
+  --model:#FB8A4C; --vegas:#8FB1D1; --kalshi:#4FD1C0; --good:#4ADE80; --bad:#F87171; --chip:#223028; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F1612; --surface:#17211B; --ink:#E7EDE8; --muted:#97A49B; --line:#2A3830;
+  --model:#FB8A4C; --vegas:#8FB1D1; --kalshi:#4FD1C0; --good:#4ADE80; --bad:#F87171; --chip:#223028; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;margin:0}
+.wrap{max-width:960px;margin:0 auto;padding-inline:16px;padding-block:24px 48px;display:grid;gap:36px}
+header{display:grid;gap:6px}
+h1{font-family:var(--display);font-weight:800;font-size:clamp(2.2rem,6vw,3.4rem);line-height:.95;letter-spacing:.01em;margin:0;text-transform:uppercase;text-wrap:balance}
+h2{font-family:var(--display);font-weight:600;font-size:1.5rem;text-transform:uppercase;letter-spacing:.03em;margin:0 0 12px}
+.sub{color:var(--muted);max-width:62ch;margin:0}
+.meta{font-family:var(--mono);font-size:.78rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 16px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.82rem;color:var(--muted);margin-bottom:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.games{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.game{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;display:grid;gap:10px;min-width:0}
+.match{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.teams{font-family:var(--display);font-weight:800;font-size:1.45rem;letter-spacing:.02em}
+.teams small{font-weight:600;color:var(--muted);font-size:.9rem;margin:0 4px}
+.when{font-family:var(--mono);font-size:.72rem;color:var(--muted);white-space:nowrap}
+.track{position:relative;height:30px}
+.track .base{position:absolute;left:0;right:0;top:14px;height:2px;background:var(--line)}
+.track .mid{position:absolute;left:50%;top:8px;width:1px;height:14px;background:var(--muted);opacity:.5}
+.mk{position:absolute;top:7px;width:16px;height:16px;margin-left:-8px;border-radius:50%;border:2px solid var(--surface)}
+.ends{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.68rem;color:var(--muted);margin-top:-4px}
+.nums{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.num{display:grid;gap:0}
+.num b{font-family:var(--mono);font-weight:500;font-size:1.05rem;font-variant-numeric:tabular-nums}
+.num span{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.pill{justify-self:start;font-size:.78rem;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--chip);color:var(--muted)}
+.pill.good{color:var(--good)} .pill.bad{color:var(--bad)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.tile{border-top:3px solid var(--line);padding-top:8px;display:grid;gap:2px}
+.tile b{font-family:var(--mono);font-weight:500;font-size:1.5rem;font-variant-numeric:tabular-nums}
+.tile span{font-size:.8rem;color:var(--muted)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.charts h3{font-size:.95rem;margin:0 0 4px} .charts p{margin:0 0 8px;font-size:.82rem;color:var(--muted)}
+svg text{fill:var(--muted);font-family:var(--mono);font-size:10px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.85rem;font-variant-numeric:tabular-nums;min-width:520px}
+th{text-align:left;font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);border-bottom:1px solid var(--line);padding:6px 8px}
+td{padding:7px 8px;border-bottom:1px solid var(--line)}
+td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
+.ok{color:var(--good);font-weight:600} .no{color:var(--bad);font-weight:600}
+.note{font-size:.85rem;color:var(--muted);max-width:68ch}
+.empty{color:var(--muted);font-size:.9rem;padding:12px 0}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>NFL Edge Board</h1>
+    <p class="sub">Model win probabilities for this week's games, side by side with Vegas and Kalshi. The model never sees betting lines, so any gap is a real disagreement.</p>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section>
+    <h2>This week</h2>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--model)"></i>Model</span>
+      <span><i class="dot" style="background:var(--vegas)"></i>Vegas (no-vig)</span>
+      <span><i class="dot" style="background:var(--kalshi)"></i>Kalshi mid</span>
+      <span>Track shows the home team's win chance</span>
+    </div>
+    <div class="games" id="games"></div>
+  </section>
+
+  <section>
+    <h2>Track record vs the market</h2>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <section class="charts">
+    <div class="panel"><h3>Brier score by season</h3><p>Lower is better. Every season is predicted by a model trained only on earlier seasons.</p><div id="seasonChart"></div></div>
+    <div class="panel"><h3>Calibration</h3><p>When the model says 70%, the home team should win about 70% of the time.</p><div id="calChart"></div></div>
+  </section>
+
+  <section>
+    <h2>This season so far</h2>
+    <div class="panel scroll" id="results"></div>
+  </section>
+
+  <section>
+    <h2>How it works</h2>
+    <p class="note">Data comes from nflverse play-by-play (2006 to now). Each game gets pregame-only features: Elo ratings, decayed offensive and defensive EPA per play and success rate, a quarterback rating built from the starter's dropback EPA, rest, and a few game flags. A logistic regression and a LightGBM model are averaged. A scheduled job refreshes data and predictions every week and snapshots Kalshi prices several times a day, logging them so the model can be graded against the exact prices that were available.</p>
+    <p class="note">Kalshi edge is the model's chance minus the ask price minus Kalshi's taker fee. Positive means the model thinks that contract is cheap. Paper results only.</p>
+  </section>
+</div>
+
+<script>
+const pct = p => p == null || isNaN(p) ? "–" : Math.round(p * 100) + "%";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function load(name, fallback) {
+  if (window.__DATA__ && name in window.__DATA__) return window.__DATA__[name];
+  try { const r = await fetch("data/" + name + ".json", {cache: "no-store"}); if (!r.ok) throw 0; return await r.json(); }
+  catch (e) { return fallback; }
+}
+
+function when(g) {
+  const d = new Date(g.gameday.slice(0, 10) + "T12:00:00");
+  const day = d.toLocaleDateString(undefined, {weekday: "short", month: "short", day: "numeric"});
+  return day + (g.gametime ? " · " + g.gametime + " ET" : "");
+}
+
+function gameCard(g, k) {
+  const marks = [["var(--vegas)", g.p_market], ["var(--kalshi)", k && k.kalshi_home_mid], ["var(--model)", g.p_model]]
+    .filter(m => m[1] != null && !isNaN(m[1]))
+    .map(m => `<i class="mk" style="left:${(m[1] * 100).toFixed(1)}%;background:${m[0]}"></i>`).join("");
+  let pill = `<span class="pill">Kalshi price not captured yet</span>`;
+  if (k) {
+    const evH = k.ev_home ?? -1, evA = k.ev_away ?? -1;
+    const side = evH >= evA ? g.home_team : g.away_team, ev = Math.max(evH, evA);
+    pill = ev > 0
+      ? `<span class="pill good">Edge: buy ${esc(side)} at ${pct(side === g.home_team ? k.kalshi_home_ask : k.kalshi_away_ask)}, +${(ev * 100).toFixed(1)}¢ per contract</span>`
+      : `<span class="pill bad">No edge after fees (best ${(ev * 100).toFixed(1)}¢)</span>`;
+  }
+  return `<article class="game">
+    <div class="match"><div class="teams">${esc(g.away_team)}<small>at</small>${esc(g.home_team)}</div><div class="when">${esc(when(g))}</div></div>
+    <div><div class="track"><div class="base"></div><div class="mid"></div>${marks}</div>
+    <div class="ends"><span>${esc(g.away_team)} wins</span><span>${esc(g.home_team)} wins</span></div></div>
+    <div class="nums">
+      <div class="num"><b style="color:var(--model)">${pct(g.p_model)}</b><span>Model</span></div>
+      <div class="num"><b style="color:var(--vegas)">${pct(g.p_market)}</b><span>Vegas</span></div>
+      <div class="num"><b style="color:var(--kalshi)">${pct(k && k.kalshi_home_mid)}</b><span>Kalshi</span></div>
+    </div>${pill}</article>`;
+}
+
+function lineChart(rows) {
+  const W = 420, H = 210, L = 44, R = 10, T = 10, B = 26;
+  const vals = rows.flatMap(r => [r.model_brier, r.vegas_brier]);
+  const lo = Math.floor(Math.min(...vals) * 100) / 100, hi = Math.ceil(Math.max(...vals) * 100) / 100;
+  const x = i => L + i * (W - L - R) / (rows.length - 1 || 1), y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+  const path = k => rows.map((r, i) => (i ? "L" : "M") + x(i).toFixed(1) + "," + y(r[k]).toFixed(1)).join("");
+  let grid = "";
+  for (let v = lo; v <= hi + 1e-9; v += 0.01) grid += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(v) + 3}" text-anchor="end">${v.toFixed(2)}</text>`;
+  const ticks = rows.map((r, i) => i % 2 === 0 || i === rows.length - 1 ? `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">${String(r.season).slice(2)}</text>` : "").join("");
+  const dots = k => rows.map((r, i) => `<circle cx="${x(i)}" cy="${y(r[k])}" r="2.6" fill="var(--${k === "model_brier" ? "model" : "vegas"})"/>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Brier score by season, model vs Vegas">${grid}${ticks}
+    <path d="${path("vegas_brier")}" fill="none" stroke="var(--vegas)" stroke-width="2"/>${dots("vegas_brier")}
+    <path d="${path("model_brier")}" fill="none" stroke="var(--model)" stroke-width="2"/>${dots("model_brier")}</svg>`;
+}
+
+function calChart(cal) {
+  const W = 420, H = 210, L = 36, R = 10, T = 10, B = 26, s = v => v;
+  const x = v => L + v * (W - L - R), y = v => T + (1 - v) * (H - T - B);
+  let grid = "";
+  for (const v of [0, .25, .5, .75, 1]) grid += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(v) + 3}" text-anchor="end">${v * 100}</text><text x="${x(v)}" y="${H - 8}" text-anchor="middle">${v * 100}</text>`;
+  const pts = cal.map(c => `<circle cx="${x(c.predicted)}" cy="${y(c.actual)}" r="${Math.max(3, Math.min(8, Math.sqrt(c.n) / 4))}" fill="var(--model)" fill-opacity=".85"><title>${Math.round(c.predicted * 100)}% predicted, ${Math.round(c.actual * 100)}% actual, ${c.n} games</title></circle>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Calibration of model probabilities">${grid}
+    <line x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(1)}" stroke="var(--muted)" stroke-dasharray="4 4"/>${pts}</svg>`;
+}
+
+(async () => {
+  const [preds, bt, meta, res, kal] = await Promise.all([
+    load("predictions", []), load("backtest", null), load("meta", {}), load("season_results", []), load("kalshi_latest", {games: []})]);
+  const kmap = Object.fromEntries((kal.games || []).map(k => [k.game_id, k]));
+  document.getElementById("meta").innerHTML =
+    `<span>Model updated ${esc((meta.updated || "").replace("T", " ").replace("+00:00", " UTC"))}</span>` +
+    `<span>Kalshi ${kal.updated ? "checked " + esc(kal.updated.replace("T", " ").replace("+00:00", " UTC")) : "not checked yet"}</span>`;
+  const sorted = [...preds].sort((a, b) => (a.gameday + (a.gametime || "")).localeCompare(b.gameday + (b.gametime || "")));
+  document.getElementById("games").innerHTML = sorted.length ? sorted.map(g => gameCard(g, kmap[g.game_id])).join("") : `<p class="empty">No upcoming games in the next ten days.</p>`;
+
+  if (bt) {
+    const o = bt.overall, b = bt.betting;
+    document.getElementById("tiles").innerHTML = [
+      [o.model.brier.toFixed(4), "Model Brier score"],
+      [o.vegas.brier.toFixed(4), "Vegas Brier score"],
+      [(o.model.accuracy * 100).toFixed(1) + "%", "Model picks correct"],
+      [(o.vegas.accuracy * 100).toFixed(1) + "%", "Vegas favorite correct"],
+      [(b.roi * 100).toFixed(1) + "%", `Paper ROI, ${b.bets.toLocaleString()} bets at ${b.edge_threshold * 100}%+ edge`]
+    ].map(([v, l]) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`).join("") +
+    `<p class="note" style="grid-column:1/-1;margin:0">${bt.test_games.toLocaleString()} games from ${bt.by_season[0].season} to ${bt.by_season.at(-1).season}, each predicted out of sample.</p>`;
+    document.getElementById("seasonChart").innerHTML = lineChart(bt.by_season);
+    document.getElementById("calChart").innerHTML = calChart(bt.calibration);
+  }
+
+  const rows = [...res].sort((a, b) => b.gameday.localeCompare(a.gameday));
+  document.getElementById("results").innerHTML = rows.length ? `<table><thead><tr><th>Wk</th><th>Game</th><th class="n">Score</th><th class="n">Model home</th><th class="n">Vegas home</th><th>Model pick</th></tr></thead><tbody>` +
+    rows.map(r => {
+      const pick = r.p_model > .5 ? r.home_team : r.away_team, right = (r.p_model > .5) === (r.home_win === 1);
+      return `<tr><td>${r.week}</td><td>${esc(r.away_team)} at ${esc(r.home_team)}</td><td class="n">${r.away_score}–${r.home_score}</td><td class="n">${pct(r.p_model)}</td><td class="n">${pct(r.p_market)}</td><td class="${right ? "ok" : "no"}">${esc(pick)} ${right ? "✓" : "✗"}</td></tr>`;
+    }).join("") + `</tbody></table>` : `<p class="empty">No completed games yet this season.</p>`;
+})();
+</script>

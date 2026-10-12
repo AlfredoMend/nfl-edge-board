@@ -1,0 +1,6 @@
+data/raw/
+data/backtest_games.csv
+preview.html
+__pycache__/
+*.pyc
+.venv/
