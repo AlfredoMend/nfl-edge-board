@@ -57,7 +57,7 @@ python -m http.server -d site # open http://localhost:8000
 
 | | Brier ↓ | Log loss ↓ | Picks correct |
 |---|---|---|---|
-| Model (ensemble) | 0.2180 | 0.625 | 64.8% |
+| Stacked ensemble (6 models) | 0.2171 | 0.623 | 65.2% |
 | Logistic only | 0.2176 | 0.624 | 64.9% |
 | LightGBM only | 0.2201 | 0.630 | 65.0% |
 | Elo only | 0.2204 | 0.631 | 64.5% |
