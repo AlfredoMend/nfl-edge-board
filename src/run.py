@@ -77,7 +77,8 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     meta = {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"), "season": season,
             "week": week, "features": FEATURES, "total_features": TOTAL_FEATURES,
-            "hfa_points": stack[2], "sigma": T.SIGMA, "cover_sd": T.COVER_SD}
+            "hfa_points": stack[2], "sigma": T.SIGMA, "cover_sd": T.COVER_SD,
+            "weather_forecasts": int((sched.weather_source == "forecast").sum())}
     (OUT / "predictions.json").write_text(preds.to_json(orient="records"))
     notes = injury_notes(sched, season, week) if week else {}
     (OUT / "injuries.json").write_text(json.dumps(notes))
