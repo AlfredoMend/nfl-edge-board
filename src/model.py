@@ -14,7 +14,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from features import FEATURES
+from features import FEATURES, TOTAL_FEATURES
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "site" / "data"
@@ -153,6 +153,34 @@ def add_spread_view(df: pd.DataFrame, scale: float) -> pd.DataFrame:
     return df
 
 
+def _total_model(train: pd.DataFrame):
+    return make_pipeline(StandardScaler(), Ridge(alpha=10)).fit(train[TOTAL_FEATURES], train.total)
+
+
+def add_projected_scores(f: pd.DataFrame, bt: pd.DataFrame, fut: pd.DataFrame):
+    """Predict total points (ridge on scoring form), then split it with the predicted margin:
+    home = (total + margin) / 2, away = (total - margin) / 2. Backtest totals are walk-forward."""
+    scored = f[f.home_score.notna() & (f.season >= TRAIN_FROM)].assign(total=lambda d: d.home_score + d.away_score)
+    bt = bt.copy()
+    bt["pred_total"] = np.nan
+    for s in bt.season.unique():
+        m = bt.season == s
+        bt.loc[m, "pred_total"] = _total_model(scored[scored.season < s]).predict(bt.loc[m, TOTAL_FEATURES])
+    if len(fut):
+        fut = fut.copy()
+        todo = fut.status == "upcoming"
+        if todo.any():
+            fut.loc[todo, "pred_total"] = _total_model(scored).predict(fut.loc[todo, TOTAL_FEATURES])
+        done = ~todo
+        if done.any():
+            fut.loc[done, "pred_total"] = fut.loc[done, "game_id"].map(bt.set_index("game_id").pred_total)
+    for d in (bt, fut):
+        if len(d):
+            d["pred_home_pts"] = (d.pred_total + d.pred_margin) / 2
+            d["pred_away_pts"] = (d.pred_total - d.pred_margin) / 2
+    return bt, fut
+
+
 def ats_summary(bt: pd.DataFrame) -> dict:
     d = bt[bt.spread_line.notna() & (bt.result != bt.spread_line)]
     conf = np.maximum(d.p_home_cover, 1 - d.p_home_cover)
@@ -164,6 +192,15 @@ def ats_summary(bt: pd.DataFrame) -> dict:
     return {"model_mae": float(np.mean(np.abs(bt.result - bt.pred_margin))),
             "vegas_mae": float(np.mean(np.abs(bt.result - bt.spread_line))),
             "breakeven": BREAKEVEN_110, "tiers": tiers}
+
+
+def totals_summary(bt: pd.DataFrame) -> dict:
+    total = bt.home_score + bt.away_score
+    v = bt.total_line.notna()
+    return {"model_mae": float(np.mean(np.abs(total - bt.pred_total))),
+            "vegas_mae": float(np.mean(np.abs(total[v] - bt.total_line[v]))),
+            "team_pts_mae": float(np.mean(np.abs(np.r_[bt.home_score - bt.pred_home_pts,
+                                                         bt.away_score - bt.pred_away_pts])))}
 
 
 def summarize(bt: pd.DataFrame, stack, edge: float = 0.03) -> dict:
@@ -242,11 +279,13 @@ def run(f: pd.DataFrame, current_season: int):
     fut, week = week_games(f, bt, stack, current_season)
     if len(fut):
         fut = add_spread_view(fut, scale)
+    bt, fut = add_projected_scores(f, bt, fut)
+    summary["totals"] = totals_summary(bt)
 
     OUT.mkdir(parents=True, exist_ok=True)
     cols = ["game_id", "season", "week", "game_type", "gameday", "gametime", "away_team", "home_team",
             "home_moneyline", "away_moneyline", "spread_line", "p_model", "p_market",
-            "status", "home_score", "away_score", "home_win", "pred_margin", "p_home_cover"] + [f"b_{b}" for b in BASES]
+            "status", "home_score", "away_score", "home_win", "pred_margin", "p_home_cover", "pred_total", "pred_home_pts", "pred_away_pts", "total_line"] + [f"b_{b}" for b in BASES]
     preds = fut[cols].copy() if len(fut) else pd.DataFrame(columns=cols)
     preds["gameday"] = preds.gameday.astype(str)
     meta = {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"),

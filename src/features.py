@@ -4,6 +4,7 @@ import pandas as pd
 
 STATS = ["off_epa", "off_sr", "off_pass_epa", "off_rush_epa",
          "def_epa", "def_sr", "def_pass_epa", "def_rush_epa"]
+FORM = STATS + ["pts_for", "pts_against"]
 
 # Elo settings (FiveThirtyEight-style NFL Elo)
 ELO_K = 20.0
@@ -49,14 +50,21 @@ def team_form(g: pd.DataFrame, tg: pd.DataFrame) -> pd.DataFrame:
         g[["game_id", "season", "gameday", "away_team", "away_qb_id"]]
         .rename(columns={"away_team": "team", "away_qb_id": "qb_id"}),
     ]).merge(tg.drop(columns="season"), on=["game_id", "team"], how="left")
+    # Points scored and allowed, for projecting each team's score
+    pts = pd.concat([
+        g[["game_id", "home_team", "home_score", "away_score"]].set_axis(["game_id", "team", "pts_for", "pts_against"], axis=1),
+        g[["game_id", "away_team", "away_score", "home_score"]].set_axis(["game_id", "team", "pts_for", "pts_against"], axis=1),
+    ])
+    long = long.merge(pts, on=["game_id", "team"], how="left")
     long = long.sort_values(["team", "gameday", "game_id"]).reset_index(drop=True)
 
-    league_mean = tg[STATS].mean().to_numpy()  # cancels in home-away diffs
+    pts_mean = float(pd.concat([g.home_score, g.away_score]).mean())
+    league_mean = np.r_[tg[STATS].mean().to_numpy(), pts_mean, pts_mean]
     alpha = 1 - 0.5 ** (1 / EWM_HALFLIFE)
     out = []
     for team, d in long.groupby("team", sort=False):
         d = d.copy()
-        vals = d[STATS].to_numpy(dtype=float)
+        vals = d[FORM].to_numpy(dtype=float)
         seasons = d.season.to_numpy()
         state = league_mean.copy()
         pre = np.empty_like(vals)
@@ -74,13 +82,13 @@ def team_form(g: pd.DataFrame, tg: pd.DataFrame) -> pd.DataFrame:
                 row = np.where(np.isnan(row), state, row)
                 state = (1 - alpha) * state + alpha * row
                 n_season += 1
-        d[[f"f_{s}" for s in STATS]] = pre
+        d[[f"f_{s}" for s in FORM]] = pre
         d["games_this_season"] = played_season
         # QB change: starter differs from the team's most recent starter.
         prev_qb = d.qb_id.shift(1)
         d["qb_change"] = ((d.qb_id != prev_qb) & prev_qb.notna() & d.qb_id.notna()).astype(int)
         out.append(d)
-    keep = ["game_id", "team", "games_this_season", "qb_change"] + [f"f_{s}" for s in STATS]
+    keep = ["game_id", "team", "games_this_season", "qb_change"] + [f"f_{s}" for s in FORM]
     return pd.concat(out)[keep]
 
 
@@ -142,6 +150,17 @@ def build_features(g: pd.DataFrame, tg: pd.DataFrame, qg: pd.DataFrame) -> pd.Da
     g["qb_change_diff"] = g.home_qb_change - g.away_qb_change
     g["early_season"] = (np.minimum(g.home_games_this_season, g.away_games_this_season) < 3).astype(int)
     g["home_win"] = np.where(g.result > 0, 1, np.where(g.result < 0, 0, np.nan))
+    # Scoring-environment features for the total-points model
+    g["home_pts_exp"] = (g.home_f_pts_for + g.away_f_pts_against) / 2
+    g["away_pts_exp"] = (g.away_f_pts_for + g.home_f_pts_against) / 2
+    g["sum_pts_exp"] = g.home_pts_exp + g.away_pts_exp
+    g["sum_off_epa"] = g.home_f_off_epa + g.away_f_off_epa
+    g["sum_def_epa"] = g.home_f_def_epa + g.away_f_def_epa
+    g["sum_off_sr"] = g.home_f_off_sr + g.away_f_off_sr
+    g["sum_def_sr"] = g.home_f_def_sr + g.away_f_def_sr
+    g["sum_qb"] = g.home_qb_rating + g.away_qb_rating
+    g["indoor"] = g.roof.isin(["dome", "closed"]).astype(int)
+    g["season_trend"] = g.season - 2015
     return g
 
 
@@ -149,3 +168,6 @@ FEATURES = ["elo_diff", "d_off_epa", "d_def_epa", "d_off_sr", "d_def_sr",
             "d_off_pass_epa", "d_def_pass_epa", "d_off_rush_epa", "d_def_rush_epa",
             "matchup_diff", "rest_diff", "neutral", "div_game", "playoff",
             "qb_change_diff", "early_season", "qb_diff"]
+
+TOTAL_FEATURES = ["sum_pts_exp", "sum_off_epa", "sum_def_epa", "sum_off_sr", "sum_def_sr",
+                  "sum_qb", "indoor", "season_trend", "playoff", "div_game", "early_season"]

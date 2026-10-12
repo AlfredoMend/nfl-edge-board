@@ -47,6 +47,11 @@ h2{font-family:var(--display);font-weight:600;font-size:1.5rem;text-transform:up
 .pill.good{color:var(--good)} .pill.bad{color:var(--bad)}
 .game.final{opacity:.82}
 .range{font-size:.78rem;color:var(--muted)}
+.pick{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;background:var(--chip);border-radius:8px;padding:8px 10px}
+.pick .who{font-family:var(--display);font-weight:800;font-size:1.25rem;letter-spacing:.03em;text-transform:uppercase}
+.pick .who em{font-style:normal;color:var(--model)}
+.pick .proj{font-family:var(--mono);font-size:.85rem;font-variant-numeric:tabular-nums}
+.teams .picked{color:var(--model)}
 .spread{display:grid;gap:4px;border-top:1px dashed var(--line);padding-top:8px;font-size:.85rem}
 .spread .row{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .spread .k{color:var(--muted)} .spread b{font-family:var(--mono);font-weight:500}
@@ -80,7 +85,7 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
   <section>
     <h2 id="weekTitle">This week</h2>
     <div class="legend">
-      <span><i class="dot" style="background:var(--model)"></i>Ensemble model</span>
+      <span><i class="dot" style="background:var(--model)"></i>Ensemble model (picked team in orange)</span>
       <span><i class="dot" style="background:var(--vegas)"></i>Vegas (no-vig)</span>
       <span><i class="dot" style="background:var(--kalshi)"></i>Kalshi mid</span>
       <span>Track shows the home team's win chance</span>
@@ -108,6 +113,7 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
   <section>
     <h2>How it works</h2>
     <p class="note">Data comes from nflverse play-by-play (2006 to now). Each game gets pregame-only features: Elo ratings, decayed offensive and defensive EPA per play and success rate, a quarterback rating built from the starter's dropback EPA, rest, and a few game flags. Six models (logistic regression, LightGBM, a point-margin regression, extra trees, a small neural net, and Elo) are combined in a stacked ensemble. A scheduled job refreshes data and predictions every week and snapshots Kalshi prices several times a day, logging them so the model can be graded against the exact prices that were available.</p>
+    <p class="note">Projected scores come from a separate total-points model built on each team's recent scoring, efficiency and quarterback play, split between the teams using the predicted margin.</p>
     <p class="note">The predicted margin comes from the ensemble's win probability, scaled to points using past games. Spread contracts on Kalshi are priced the same way: the chance a team wins by more than the line, compared to the ask price after fees.</p>
     <p class="note">Kalshi edge is the model's chance minus the ask price minus Kalshi's taker fee. Positive means the model thinks that contract is cheap. Paper results only.</p>
   </section>
@@ -129,6 +135,24 @@ function when(g) {
   return day + (g.gametime ? " · " + g.gametime + " ET" : "");
 }
 
+function projScore(g) {
+  if (g.pred_home_pts == null) return "";
+  let a = Math.round(g.pred_away_pts), h = Math.round(g.pred_home_pts);
+  const f = a === h ? (x => x.toFixed(1)) : (x => Math.round(x));
+  return `${esc(g.away_team)} ${f(g.pred_away_pts)}, ${esc(g.home_team)} ${f(g.pred_home_pts)}`;
+}
+function pickTeam(g) { return g.p_model >= 0.5 ? g.home_team : g.away_team; }
+function pickProb(g) { return g.p_model >= 0.5 ? g.p_model : 1 - g.p_model; }
+function teamsHtml(g) {
+  const p = pickTeam(g);
+  const t = x => `<span class="${x === p ? "picked" : ""}">${esc(x)}</span>`;
+  return `${t(g.away_team)}<small>at</small>${t(g.home_team)}`;
+}
+function pickBox(g, label) {
+  return `<div class="pick"><div class="who">${label} <em>${esc(pickTeam(g))}</em></div>
+    <div class="proj">${pct(pickProb(g))} to win${g.pred_home_pts != null ? " · " + projScore(g) : ""}</div></div>`;
+}
+
 function gameCard(g, k) {
   const marks = [["var(--vegas)", g.p_market], ["var(--kalshi)", k && k.kalshi_home_mid], ["var(--model)", g.p_model]]
     .filter(m => m[1] != null && !isNaN(m[1]))
@@ -142,7 +166,8 @@ function gameCard(g, k) {
       : `<span class="pill bad">No edge after fees (best ${(ev * 100).toFixed(1)}¢)</span>`;
   }
   return `<article class="game">
-    <div class="match"><div class="teams">${esc(g.away_team)}<small>at</small>${esc(g.home_team)}</div><div class="when">${esc(when(g))}</div></div>
+    <div class="match"><div class="teams">${teamsHtml(g)}</div><div class="when">${esc(when(g))}</div></div>
+    ${pickBox(g, "Model pick:")}
     <div><div class="track"><div class="base"></div><div class="mid"></div>${marks}</div>
     <div class="ends"><span>${esc(g.away_team)} wins</span><span>${esc(g.home_team)} wins</span></div></div>
     <div class="nums">
@@ -171,6 +196,7 @@ function spreadBlock(g, k) {
   const lean = atsLean(g);
   let rows = `<div class="row"><span class="k">Model margin</span><b>${esc(modelMargin(g))}</b></div>
     <div class="row"><span class="k">Vegas spread</span><b>${esc(vegasLine(g))}</b></div>`;
+  if (g.pred_total != null) rows += `<div class="row"><span class="k">Projected total</span><b>${g.pred_total.toFixed(1)}${g.total_line != null ? " · Vegas O/U " + g.total_line : ""}</b></div>`;
   if (lean) rows += `<div class="row"><span class="k">Model leans</span><b>${esc(lean.label)} · ${pct(lean.p)} to cover</b></div>`;
   let pill = "";
   if (k && k.best) {
@@ -201,12 +227,13 @@ function atsResult(g) {
 function finalCard(g) {
   const pick = g.p_model > .5 ? g.home_team : g.away_team, right = (g.p_model > .5) === (g.home_win === 1);
   return `<article class="game final">
-    <div class="match"><div class="teams">${esc(g.away_team)}<small>at</small>${esc(g.home_team)}</div><div class="when">Final</div></div>
-    <div class="score">${esc(g.away_team)} ${g.away_score}, ${esc(g.home_team)} ${g.home_score}</div>
+    <div class="match"><div class="teams">${teamsHtml(g)}</div><div class="when">Final</div></div>
+    <div class="score">Final: ${esc(g.away_team)} ${g.away_score}, ${esc(g.home_team)} ${g.home_score}</div>
+    ${pickBox(g, "Model picked:")}
     <div class="nums">
       <div class="num"><b style="color:var(--model)">${pct(g.p_model)}</b><span>Model home</span></div>
       <div class="num"><b style="color:var(--vegas)">${pct(g.p_market)}</b><span>Vegas home</span></div>
-      <div class="num"><b>${esc(pick)}</b><span>Model pick</span></div>
+      <div class="num"><b>${g.pred_total != null ? g.pred_total.toFixed(1) : "–"}</b><span>Proj. total</span></div>
     </div><span class="pill ${right ? "good" : "bad"}">${right ? "Model pick won" : "Model pick lost"}</span>${atsResult(g)}</article>`;
 }
 
@@ -260,7 +287,8 @@ function calChart(cal) {
       [(o.vegas.accuracy * 100).toFixed(1) + "%", "Vegas favorite correct"],
       [(b.roi * 100).toFixed(1) + "%", `Paper ROI, ${b.bets.toLocaleString()} bets at ${b.edge_threshold * 100}%+ edge`],
       ...(bt.ats ? [[(bt.ats.tiers[0].win_rate * 100).toFixed(1) + "%", `Against the spread (${(bt.ats.breakeven * 100).toFixed(1)}% needed to profit)`],
-                    [bt.ats.model_mae.toFixed(1) + " pts", `Model margin error, Vegas ${bt.ats.vegas_mae.toFixed(1)} pts`]] : [])
+                    [bt.ats.model_mae.toFixed(1) + " pts", `Model margin error, Vegas ${bt.ats.vegas_mae.toFixed(1)} pts`]] : []),
+      ...(bt.totals ? [[bt.totals.model_mae.toFixed(1) + " pts", `Model total-points error, Vegas ${bt.totals.vegas_mae.toFixed(1)} pts`]] : [])
     ].map(([v, l]) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`).join("") +
     `<p class="note" style="grid-column:1/-1;margin:0">${bt.test_games.toLocaleString()} games from ${bt.by_season[0].season} to ${bt.by_season.at(-1).season}, each predicted out of sample.</p>`;
     if (bt.members) {
