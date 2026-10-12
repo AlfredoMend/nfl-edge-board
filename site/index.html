@@ -558,7 +558,10 @@ function calChart(cal) {
   if ((KPROPS.markets || []).length) {
     document.getElementById("kpropsSec").hidden = false;
     document.getElementById("kpropsNote").textContent = `Every open Kalshi player prop on an upcoming game, priced with the model's 10,000 simulations. Showing the ${top.length} contracts with at least ${Math.round((KPROPS.min_edge || 0.03) * 100)}¢ of value after fees and a tight market. Checked ${(KPROPS.updated || "").replace("T", " ").replace("+00:00", " UTC")}. Large gaps usually mean the market knows something the model does not, so treat these as leads, not locks.`;
-    document.getElementById("kprops").innerHTML = top.length ? kpropTable(top, true) : `<p class="empty">No contracts clear the bar right now.</p>`;
+    // Edge list paused: the receiver usage model under-projects starters (see README), so
+    // receiver and TD edges are not trustworthy until that fix is validated.
+    document.getElementById("kpropsNote").textContent = `Kalshi prop prices are being collected every run (${(KPROPS.markets || []).length} contracts priced, checked ${(KPROPS.updated || "").replace("T", " ").replace("+00:00", " UTC")}). The edge list is paused while a known bias is fixed: the model under-projects starting receivers, especially players returning from injury, which makes many receiver NO contracts look better than they are. Per-game prices remain on each game's Player props tab for reference.`;
+    document.getElementById("kprops").innerHTML = "";
   }
   const m = location.hash.match(/^#g-([A-Za-z0-9_]+)$/);
   if (m && GAMES[m[1]]) openGame(m[1]);
