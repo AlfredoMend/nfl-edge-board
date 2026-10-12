@@ -42,7 +42,7 @@ jobs:
         run: |
           git config user.name "nfl-model-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add data/team_games.csv data/qb_games.csv data/kalshi_history.csv site/data
+          git add -A data site/data
           git diff --cached --quiet || git commit -m "Update predictions and prices"
           git push
 
