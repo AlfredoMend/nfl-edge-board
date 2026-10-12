@@ -119,17 +119,28 @@ def summarize(bt: pd.DataFrame, edge: float = 0.03) -> dict:
             "test_games": int(len(bt))}
 
 
-def upcoming(f: pd.DataFrame, days: int = 10) -> pd.DataFrame:
+def current_week(f: pd.DataFrame, season: int):
+    """The NFL week in progress: the earliest week that still has an unplayed game."""
+    left = f[(f.season == season) & f.result.isna()]
+    return int(left.week.min()) if len(left) else None
+
+
+def week_games(f: pd.DataFrame, bt: pd.DataFrame, season: int) -> tuple[pd.DataFrame, int | None]:
+    """All games of the current week. Unplayed games get fresh predictions trained on
+    everything played so far. Finished games keep the prediction made before kickoff."""
+    week = current_week(f, season)
+    if week is None:
+        return f.iloc[0:0].copy(), None
+    wk = f[(f.season == season) & (f.week == week)].copy()
+    todo = wk[wk.result.isna()].copy()
     done = f[f.home_win.notna() & (f.season >= TRAIN_FROM)]
-    now = pd.Timestamp.now(tz="America/Los_Angeles").tz_localize(None).normalize()
-    fut = f[f.home_win.isna() & (f.gameday >= now) & (f.gameday <= now + pd.Timedelta(days=days))].copy()
-    if fut.empty:
-        fut = f[f.home_win.isna()].sort_values("gameday").head(16).copy()
-    if fut.empty:
-        return fut
-    fut["p_logit"], fut["p_gbm"], fut["p_model"] = fit_predict(done, fut)
-    fut["p_market"] = market_prob(fut)
-    return fut
+    if len(todo):
+        todo["p_logit"], todo["p_gbm"], todo["p_model"] = fit_predict(done, todo)
+        todo["p_market"] = market_prob(todo)
+        todo["status"] = "upcoming"
+    final = bt[(bt.season == season) & (bt.week == week)].copy()
+    final["status"] = "final"
+    return pd.concat([todo, final], ignore_index=True), week
 
 
 def run(f: pd.DataFrame, current_season: int):
@@ -137,19 +148,18 @@ def run(f: pd.DataFrame, current_season: int):
     f["p_elo"] = 1 / (1 + 10 ** (-f.elo_diff / 400))
     bt = backtest(f, current_season)
     summary = summarize(bt)
-    fut = upcoming(f)
+    fut, week = week_games(f, bt, current_season)
 
     OUT.mkdir(parents=True, exist_ok=True)
-    cols = ["game_id", "season", "week", "gameday", "gametime", "away_team", "home_team",
-            "home_moneyline", "away_moneyline", "spread_line", "p_model", "p_logit", "p_gbm", "p_market"]
+    cols = ["game_id", "season", "week", "game_type", "gameday", "gametime", "away_team", "home_team",
+            "home_moneyline", "away_moneyline", "spread_line", "p_model", "p_logit", "p_gbm", "p_market",
+            "status", "home_score", "away_score", "home_win"]
     preds = fut[cols].copy() if len(fut) else pd.DataFrame(columns=cols)
     preds["gameday"] = preds.gameday.astype(str)
-    recent = bt[bt.season == current_season][cols + ["home_score", "away_score", "home_win"]].copy()
-    recent["gameday"] = recent.gameday.astype(str)
     meta = {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"),
-            "season": current_season, "features": FEATURES}
+            "season": current_season, "week": week, "features": FEATURES}
     (OUT / "predictions.json").write_text(preds.to_json(orient="records"))
-    (OUT / "season_results.json").write_text(recent.to_json(orient="records"))
+    (OUT / "season_results.json").unlink(missing_ok=True)
     (OUT / "backtest.json").write_text(json.dumps(summary, indent=1))
     (OUT / "meta.json").write_text(json.dumps(meta))
     bt.to_csv(ROOT / "data" / "backtest_games.csv", index=False)

@@ -6,6 +6,9 @@ on:
     - cron: "0 15 * * 4,6,0"    # Thu/Sat/Sun morning: refresh starters and lines
     - cron: "17 */3 * * *"      # every 3 hours: Kalshi price snapshot
   workflow_dispatch: {}
+  push:                         # redeploy when code or page changes (not data commits)
+    branches: [main]
+    paths: ["src/**", "site/index.html", ".github/workflows/**", "requirements.txt"]
 
 permissions:
   contents: write
@@ -31,7 +34,7 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Refresh data and retrain model
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule != '17 */3 * * *'
+        if: github.event_name != 'schedule' || github.event.schedule != '17 */3 * * *'
         run: python src/run.py --refresh
 
       - name: Snapshot Kalshi prices
@@ -44,7 +47,7 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add -A data site/data
           git diff --cached --quiet || git commit -m "Update predictions and prices"
-          git push
+          git pull --rebase -q origin main && git push
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

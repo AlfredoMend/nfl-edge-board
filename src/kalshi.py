@@ -92,6 +92,8 @@ def match_to_games(snap: pd.DataFrame, preds: pd.DataFrame) -> pd.DataFrame:
 
 def main():
     preds = pd.read_json(ROOT / "site" / "data" / "predictions.json")
+    if "status" in preds:
+        preds = preds[preds.status == "upcoming"]
     snap = snapshot()
     hist = ROOT / "data" / "kalshi_history.csv"
     snap.to_csv(hist, mode="a", header=not hist.exists(), index=False)

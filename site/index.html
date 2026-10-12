@@ -45,6 +45,9 @@ h2{font-family:var(--display);font-weight:600;font-size:1.5rem;text-transform:up
 .num span{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 .pill{justify-self:start;font-size:.78rem;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--chip);color:var(--muted)}
 .pill.good{color:var(--good)} .pill.bad{color:var(--bad)}
+.game.final{opacity:.82}
+.score{font-family:var(--mono);font-size:.95rem;font-variant-numeric:tabular-nums}
+.sublabel{font-family:var(--display);font-weight:600;font-size:1.05rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:20px 0 10px}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
 .tile{border-top:3px solid var(--line);padding-top:8px;display:grid;gap:2px}
 .tile b{font-family:var(--mono);font-weight:500;font-size:1.5rem;font-variant-numeric:tabular-nums}
@@ -66,12 +69,12 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
 <div class="wrap">
   <header>
     <h1>NFL Edge Board</h1>
-    <p class="sub">Model win probabilities for this week's games, side by side with Vegas and Kalshi. The model never sees betting lines, so any gap is a real disagreement.</p>
+    <p class="sub">Model win probabilities for the current NFL week, side by side with Vegas and Kalshi. The model never sees betting lines, so any gap is a real disagreement.</p>
     <div class="meta" id="meta"></div>
   </header>
 
   <section>
-    <h2>This week</h2>
+    <h2 id="weekTitle">This week</h2>
     <div class="legend">
       <span><i class="dot" style="background:var(--model)"></i>Model</span>
       <span><i class="dot" style="background:var(--vegas)"></i>Vegas (no-vig)</span>
@@ -79,6 +82,7 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
       <span>Track shows the home team's win chance</span>
     </div>
     <div class="games" id="games"></div>
+    <div id="finals"></div>
   </section>
 
   <section>
@@ -89,11 +93,6 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
   <section class="charts">
     <div class="panel"><h3>Brier score by season</h3><p>Lower is better. Every season is predicted by a model trained only on earlier seasons.</p><div id="seasonChart"></div></div>
     <div class="panel"><h3>Calibration</h3><p>When the model says 70%, the home team should win about 70% of the time.</p><div id="calChart"></div></div>
-  </section>
-
-  <section>
-    <h2>This season so far</h2>
-    <div class="panel scroll" id="results"></div>
   </section>
 
   <section>
@@ -142,6 +141,18 @@ function gameCard(g, k) {
     </div>${pill}</article>`;
 }
 
+function finalCard(g) {
+  const pick = g.p_model > .5 ? g.home_team : g.away_team, right = (g.p_model > .5) === (g.home_win === 1);
+  return `<article class="game final">
+    <div class="match"><div class="teams">${esc(g.away_team)}<small>at</small>${esc(g.home_team)}</div><div class="when">Final</div></div>
+    <div class="score">${esc(g.away_team)} ${g.away_score}, ${esc(g.home_team)} ${g.home_score}</div>
+    <div class="nums">
+      <div class="num"><b style="color:var(--model)">${pct(g.p_model)}</b><span>Model home</span></div>
+      <div class="num"><b style="color:var(--vegas)">${pct(g.p_market)}</b><span>Vegas home</span></div>
+      <div class="num"><b>${esc(pick)}</b><span>Model pick</span></div>
+    </div><span class="pill ${right ? "good" : "bad"}">${right ? "Model pick won" : "Model pick lost"}</span></article>`;
+}
+
 function lineChart(rows) {
   const W = 420, H = 210, L = 44, R = 10, T = 10, B = 26;
   const vals = rows.flatMap(r => [r.model_brier, r.vegas_brier]);
@@ -168,14 +179,20 @@ function calChart(cal) {
 }
 
 (async () => {
-  const [preds, bt, meta, res, kal] = await Promise.all([
-    load("predictions", []), load("backtest", null), load("meta", {}), load("season_results", []), load("kalshi_latest", {games: []})]);
+  const [preds, bt, meta, kal] = await Promise.all([
+    load("predictions", []), load("backtest", null), load("meta", {}), load("kalshi_latest", {games: []})]);
   const kmap = Object.fromEntries((kal.games || []).map(k => [k.game_id, k]));
   document.getElementById("meta").innerHTML =
     `<span>Model updated ${esc((meta.updated || "").replace("T", " ").replace("+00:00", " UTC"))}</span>` +
     `<span>Kalshi ${kal.updated ? "checked " + esc(kal.updated.replace("T", " ").replace("+00:00", " UTC")) : "not checked yet"}</span>`;
-  const sorted = [...preds].sort((a, b) => (a.gameday + (a.gametime || "")).localeCompare(b.gameday + (b.gametime || "")));
-  document.getElementById("games").innerHTML = sorted.length ? sorted.map(g => gameCard(g, kmap[g.game_id])).join("") : `<p class="empty">No upcoming games in the next ten days.</p>`;
+  const byTime = (a, b) => (a.gameday + (a.gametime || "")).localeCompare(b.gameday + (b.gametime || ""));
+  const todo = preds.filter(g => g.status !== "final").sort(byTime);
+  const done = preds.filter(g => g.status === "final").sort(byTime);
+  if (meta.week) document.getElementById("weekTitle").textContent = (preds[0] && preds[0].game_type !== "REG" ? "Playoffs, week " : "Week ") + meta.week;
+  document.getElementById("games").innerHTML =
+    (todo.length ? todo.map(g => gameCard(g, kmap[g.game_id])).join("") : `<p class="empty">Every game this week is final. Next week's board posts Tuesday morning.</p>`);
+  document.getElementById("finals").innerHTML = done.length
+    ? `<h3 class="sublabel">Already played this week</h3><div class="games">${done.map(finalCard).join("")}</div>` : "";
 
   if (bt) {
     const o = bt.overall, b = bt.betting;
@@ -191,11 +208,5 @@ function calChart(cal) {
     document.getElementById("calChart").innerHTML = calChart(bt.calibration);
   }
 
-  const rows = [...res].sort((a, b) => b.gameday.localeCompare(a.gameday));
-  document.getElementById("results").innerHTML = rows.length ? `<table><thead><tr><th>Wk</th><th>Game</th><th class="n">Score</th><th class="n">Model home</th><th class="n">Vegas home</th><th>Model pick</th></tr></thead><tbody>` +
-    rows.map(r => {
-      const pick = r.p_model > .5 ? r.home_team : r.away_team, right = (r.p_model > .5) === (r.home_win === 1);
-      return `<tr><td>${r.week}</td><td>${esc(r.away_team)} at ${esc(r.home_team)}</td><td class="n">${r.away_score}–${r.home_score}</td><td class="n">${pct(r.p_model)}</td><td class="n">${pct(r.p_market)}</td><td class="${right ? "ok" : "no"}">${esc(pick)} ${right ? "✓" : "✗"}</td></tr>`;
-    }).join("") + `</tbody></table>` : `<p class="empty">No completed games yet this season.</p>`;
 })();
 </script>
