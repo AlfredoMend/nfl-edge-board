@@ -18,6 +18,55 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "site" / "data"
 
 
+TEAM_STATS = [  # (group, label, column suffix, higher is better, format)
+    ("Offense", "Opponent-adjusted EPA per play", "adj_off_epa", True, "epa"),
+    ("Offense", "EPA per dropback", "f_off_pass_epa", True, "epa"),
+    ("Offense", "EPA per rush", "f_off_rush_epa", True, "epa"),
+    ("Offense", "Success rate", "f_off_sr", True, "pct"),
+    ("Offense", "Early-down EPA", "f_off_early_epa", True, "epa"),
+    ("Offense", "Explosive play rate", "f_off_explosive", True, "pct"),
+    ("Offense", "CPOE", "f_off_cpoe", True, "num"),
+    ("Offense", "Avg depth of target", "f_off_adot", True, "num"),
+    ("Offense", "Pressure rate allowed", "f_off_press_rate", False, "pct"),
+    ("Offense", "Turnover-worthy pass rate", "f_off_twp_rate", False, "pct"),
+    ("Offense", "Red-zone TD rate", "f_rz_off", True, "pct"),
+    ("Offense", "Plays per game", "f_plays_total", True, "num"),
+    ("Defense", "Opponent-adjusted EPA allowed", "adj_def_epa", False, "epa"),
+    ("Defense", "EPA per dropback allowed", "f_def_pass_epa", False, "epa"),
+    ("Defense", "EPA per rush allowed", "f_def_rush_epa", False, "epa"),
+    ("Defense", "Success rate allowed", "f_def_sr", False, "pct"),
+    ("Defense", "Explosive rate allowed", "f_def_explosive", False, "pct"),
+    ("Defense", "Pressure rate", "f_def_press_rate", True, "pct"),
+    ("Defense", "Turnover-worthy passes forced", "f_def_twp_rate", True, "pct"),
+    ("Defense", "Red-zone TD rate allowed", "f_rz_def", False, "pct"),
+    ("Overall", "Elo rating", "elo", True, "int"),
+    ("Overall", "Starting QB EPA per dropback", "qb_rating", True, "epa"),
+]
+
+
+def team_stats(f: pd.DataFrame, season: int) -> dict:
+    """Pregame ratings for every team at its next game, with league ranks (1 = best)."""
+    nxt = f[(f.season == season) & f.result.isna()].sort_values(["gameday", "game_id"])
+    rows = {}
+    for side in ("home", "away"):
+        for r in nxt.itertuples():
+            team = getattr(r, f"{side}_team")
+            if team in rows:
+                continue
+            rows[team] = {s[2]: float(getattr(r, f"{side}_{s[2]}")) for s in TEAM_STATS}
+    df = pd.DataFrame(rows).T
+    out = {"stats": [{"group": g, "label": l, "key": k, "higher_better": hb, "fmt": fm} for g, l, k, hb, fm in TEAM_STATS],
+           "teams": {}}
+    for team in df.index:
+        out["teams"][team] = {}
+    for g, l, k, hb, fm in TEAM_STATS:
+        rank = df[k].rank(ascending=not hb, method="min")
+        for team in df.index:
+            out["teams"][team][k] = {"v": round(float(df.at[team, k]), 4), "rank": int(rank[team])}
+    out["n_teams"] = int(len(df))
+    return out
+
+
 def current_week(f: pd.DataFrame, season: int):
     left = f[(f.season == season) & f.result.isna()]
     return int(left.week.min()) if len(left) else None
@@ -80,6 +129,18 @@ def main():
             "hfa_points": stack[2], "sigma": T.SIGMA, "cover_sd": T.COVER_SD,
             "weather_forecasts": int((sched.weather_source == "forecast").sum())}
     (OUT / "predictions.json").write_text(preds.to_json(orient="records"))
+    (OUT / "teamstats.json").write_text(json.dumps(team_stats(f, season)))
+    upcoming = preds[preds.status == "upcoming"]
+    if len(upcoming):
+        try:
+            from props import project_week
+            pr = project_week(sched, upcoming, refresh=refresh)
+            (OUT / "props.json").write_text(json.dumps(pr))
+            print(f"props: simulated {len(pr)} games x {pr[next(iter(pr))]['n_sims']:,} sims")
+        except Exception as e:  # props are an add-on; never block the main board
+            import traceback
+            traceback.print_exc()
+            print("props failed:", e)
     notes = injury_notes(sched, season, week) if week else {}
     (OUT / "injuries.json").write_text(json.dumps(notes))
     (OUT / "backtest.json").write_text(json.dumps(summary, indent=1))

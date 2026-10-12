@@ -12,6 +12,9 @@ Live site: https://alfredomend.github.io/nfl-edge-board/
 | `src/features.py` | Exponential moving averages, opponent adjustment, red-zone regression, QB isolation, rest, travel, weather |
 | `src/injuries.py` | Official injury reports weighted by each player's recent snap share, by position group |
 | `src/weather.py` | Kickoff forecasts for upcoming outdoor games (Open-Meteo) |
+| `src/players.py` | Player box scores from play-by-play (official counting rules) and team volume |
+| `src/props.py` | Player prop projections: usage x efficiency, 10,000-game Monte Carlo per game, medians |
+| `src/props_backtest.py` | Walk-forward calibration check of the prop medians on a past season |
 | `src/geo.py` | Stadium coordinates and time zones for travel and body-clock features |
 | `src/train.py` | Base models (logistic, XGBoost, LightGBM, ridge, extra trees, neural net, Elo), neutral-site stacking, home field, totals |
 | `src/backtest.py` | Walk-forward time-series evaluation against closing lines, closing line value on Kalshi |
@@ -70,6 +73,27 @@ Tested and rejected: a wider 10% to 90% neutral window, recency-weighted trainin
 Also added for live games, which the backtest cannot measure: kickoff weather forecasts (nflverse only records weather after a game) and correct handling of retractable roofs, which have no roof value before kickoff.
 
 Tested and not kept: 10 mph wind threshold, injury position groups in the linear models, different offseason carryover for Elo, team form and QB ratings, recency-weighted training.
+
+## Player props
+
+Each upcoming game is simulated 10,000 times. A simulation draws the final margin and total from the game model, sets each team's pass attempts and carries from its recent volume and the simulated game script, splits targets and carries among active players by recent usage (Out and Doubtful players removed and their usage redistributed), draws catches from catch rates and yards from real per-catch and per-carry NFL yardage distributions scaled to the player and opponent, and hands out touchdowns from the simulated score by red-zone usage and touchdown history. QB passing is the sum of his receivers, so the numbers agree. Every stat is reported as the **median** of the simulations (the fair line for a half-point prop), with the middle 50% range and anytime-TD probability.
+
+Walk-forward check on the 2025 regular season (weeks 3 to 18, every projection made only from earlier games, that week's injury report and the out-of-sample game model). Touchdown and spread calibration was set on 2024 and not re-tuned on 2025.
+
+| Market | Projections | Actual over median | Actual under median | In middle 50% (target 50%) | Error, model | Error, last-4 avg |
+|---|---|---|---|---|---|---|
+| Passing yards | 471 | 50.5% | 49.5% | 50% | 59.4 | 68.6 |
+| Completions | 471 | 45.0% | 50.3% | 48% | 4.7 | 5.7 |
+| Pass attempts | 471 | 43.9% | 50.5% | 46% | 6.7 | 8.1 |
+| Passing TDs | 471 | 36.7% | 33.3% | 57% | 0.9 | 1.0 |
+| Rushing yards | 1,431 | 54.3% | 42.9% | 51% | 19.2 | 20.5 |
+| Rush attempts | 1,431 | 50.0% | 36.2% | 49% | 3.1 | 3.2 |
+| Receptions | 3,049 | 43.1% | 35.0% | 50% | 1.5 | 1.6 |
+| Receiving yards | 3,049 | 53.2% | 46.2% | 48% | 19.2 | 21.1 |
+
+Count stats land exactly on the median often, so over and under do not add to 100%. Anytime TD: average predicted 17.7% vs 17.6% actual, Brier 0.1292 vs 0.1452 for a flat rate.
+
+Sportsbook prop lines are not in any free data source, so the site shows the model's fair line and probabilities rather than an edge against a book.
 
 ## Run locally
 

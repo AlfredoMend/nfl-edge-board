@@ -76,9 +76,55 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
 .ok{color:var(--good);font-weight:600} .no{color:var(--bad);font-weight:600}
 .note{font-size:.85rem;color:var(--muted);max-width:68ch}
 .empty{color:var(--muted);font-size:.9rem;padding:12px 0}
+.open{justify-self:stretch;font:600 .85rem var(--body);color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer;text-align:left;display:flex;justify-content:space-between}
+.open:hover{border-color:var(--model);color:var(--model)}
+.open:focus-visible,.tab:focus-visible,.close:focus-visible,.tsel:focus-visible{outline:2px solid var(--model);outline-offset:2px}
+/* Game detail sheet */
+.sheet{position:fixed;inset:0;background:var(--bg);overflow-y:auto;z-index:10}
+.sheet-bar{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);z-index:2;padding-top:env(safe-area-inset-top,0px)}
+.sheet-bar .in{max-width:960px;margin:0 auto;padding-inline:16px;padding-block:10px;display:flex;align-items:center;gap:12px}
+.close{font:600 .85rem var(--body);background:var(--chip);color:var(--ink);border:0;border-radius:8px;padding:7px 12px;cursor:pointer}
+.sheet-bar .ttl{font-family:var(--display);font-weight:800;font-size:1.3rem;text-transform:uppercase;letter-spacing:.02em;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sheet .body{max-width:960px;margin:0 auto;padding-inline:16px;padding-block:18px 56px;display:grid;gap:20px}
+.hero{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px}
+.hero .tm{display:grid;gap:2px}
+.hero .tm:last-child{text-align:right}
+.hero .ab{font-family:var(--display);font-weight:800;font-size:clamp(2.4rem,9vw,3.6rem);line-height:.9}
+.hero .pts{font-family:var(--mono);font-size:1.4rem;font-variant-numeric:tabular-nums}
+.hero .lbl{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.hero .vs{font-family:var(--display);font-weight:600;color:var(--muted);font-size:1rem;text-transform:uppercase}
+.picked-ab{color:var(--model)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.tab{font:600 .9rem var(--body);background:none;border:0;border-bottom:3px solid transparent;color:var(--muted);padding:8px 10px;cursor:pointer;margin-bottom:-1px}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--model)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.kv{display:grid;grid-template-columns:1fr auto auto;gap:6px 14px;font-size:.88rem;align-items:baseline}
+.kv .h{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.kv b{font-family:var(--mono);font-weight:500;text-align:right;font-variant-numeric:tabular-nums}
+.statrow td{vertical-align:middle}
+.rk{display:inline-block;min-width:2.6em;text-align:center;font-family:var(--mono);font-size:.72rem;border-radius:999px;padding:1px 6px;background:var(--chip);color:var(--muted);margin-left:6px}
+.rk.top{color:var(--good)} .rk.bot{color:var(--bad)}
+.edge{font-size:.7rem;color:var(--model);font-weight:600}
+.grp td{font-family:var(--display);font-weight:600;font-size:.95rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);border-bottom:1px solid var(--line);padding-top:14px}
+.tsel{font:600 .85rem var(--body);background:var(--chip);color:var(--muted);border:1px solid transparent;border-radius:999px;padding:5px 12px;cursor:pointer}
+.tsel[aria-pressed="true"]{background:var(--surface);color:var(--ink);border-color:var(--model)}
+.props td .m{font-family:var(--mono);font-weight:500;font-size:.95rem;display:block}
+.props td .r{font-family:var(--mono);font-size:.68rem;color:var(--muted);display:block;white-space:nowrap}
+.props td.p{white-space:nowrap}
+.props td.p small{color:var(--muted);margin-left:6px;font-size:.72rem}
+.props table{min-width:560px}
+.q{color:var(--bad);font-size:.7rem;font-weight:600;margin-left:4px}
 </style>
 
-<div class="wrap">
+<div class="sheet" id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="sheet-bar"><div class="in">
+    <button class="close" id="sheetClose" type="button">← All games</button>
+    <div class="ttl" id="sheetTitle"></div>
+  </div></div>
+  <div class="body" id="sheetBody"></div>
+</div>
+
+<div class="wrap" id="board">
   <header>
     <h1>NFL Edge Board</h1>
     <p class="sub">Model win probabilities for the current NFL week, side by side with Vegas and Kalshi. The model never sees betting lines, so any gap is a real disagreement.</p>
@@ -200,7 +246,8 @@ function gameCard(g, k) {
       <div class="num"><b style="color:var(--model)">${pct(g.p_model)}</b><span>Model</span></div>
       <div class="num"><b style="color:var(--vegas)">${pct(g.p_market)}</b><span>Vegas</span></div>
       <div class="num"><b style="color:var(--kalshi)">${pct(k && k.kalshi_home_mid)}</b><span>Kalshi</span></div>
-    </div>${contextBlock(g)}${rangeLine(g)}${pill}${spreadBlock(g, k)}</article>`;
+    </div>${contextBlock(g)}${rangeLine(g)}${pill}${spreadBlock(g, k)}
+    <button class="open" type="button" data-game="${esc(g.game_id)}"><span>Game overview, team stats and player props</span><span aria-hidden="true">→</span></button></article>`;
 }
 
 function fmtLine(team, n) { return `${team} ${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n) === 0 ? "PK" : Math.abs(n)}`; }
@@ -260,8 +307,154 @@ function finalCard(g) {
       <div class="num"><b style="color:var(--model)">${pct(g.p_model)}</b><span>Model home</span></div>
       <div class="num"><b style="color:var(--vegas)">${pct(g.p_market)}</b><span>Vegas home</span></div>
       <div class="num"><b>${g.pred_total != null ? g.pred_total.toFixed(1) : "–"}</b><span>Proj. total</span></div>
-    </div><span class="pill ${right ? "good" : "bad"}">${right ? "Model pick won" : "Model pick lost"}</span>${atsResult(g)}</article>`;
+    </div><span class="pill ${right ? "good" : "bad"}">${right ? "Model pick won" : "Model pick lost"}</span>${atsResult(g)}
+    <button class="open" type="button" data-game="${esc(g.game_id)}"><span>Game overview and team stats</span><span aria-hidden="true">→</span></button></article>`;
 }
+
+// ---------------------------------------------------------------- game detail
+let GAMES = {}, PROPS = {}, TSTATS = null, KMAP = {}, SHEET = {game: null, tab: "overview", team: null};
+
+function fmtStat(v, fmt) {
+  if (v == null || isNaN(v)) return "–";
+  if (fmt === "pct") return (v * 100).toFixed(1) + "%";
+  if (fmt === "epa") return (v >= 0 ? "+" : "") + v.toFixed(3);
+  if (fmt === "int") return Math.round(v).toString();
+  return v.toFixed(1);
+}
+function rankChip(r, n) {
+  const cls = r <= 10 ? "top" : r > n - 10 ? "bot" : "";
+  return `<span class="rk ${cls}" title="League rank">${r}</span>`;
+}
+const med = (s, d = 0) => s ? s.median.toFixed(d) : "–";
+const rng = (s, d = 0) => s ? `${s.p25.toFixed(d)}–${s.p75.toFixed(d)}` : "";
+const cell = (s, d = 0) => `<td class="n"><span class="m">${med(s, d)}</span><span class="r">${rng(s, d)}</span></td>`;
+
+function overviewTab(g) {
+  const pr = PROPS[g.game_id], k = KMAP[g.game_id];
+  const tRow = (label, key, d = 0) => {
+    if (!pr) return "";
+    return `<span>${label}</span><b>${med(pr.away.team[key], d)}</b><b>${med(pr.home.team[key], d)}</b>`;
+  };
+  const lean = atsLean(g);
+  const proj = pr ? `<div class="panel"><h3 style="margin:0 0 10px;font-size:.95rem">Team projections</h3>
+    <div class="kv"><span class="h">Median of ${pr.n_sims.toLocaleString()} sims</span><span class="h" style="text-align:right">${esc(g.away_team)}</span><span class="h" style="text-align:right">${esc(g.home_team)}</span>
+    ${tRow("Points", "points")}${tRow("Pass attempts", "pass_att")}${tRow("Passing yards", "pass_yds")}${tRow("Carries", "carries")}${tRow("Rushing yards", "rush_yds")}</div></div>`
+    : `<div class="panel"><p class="note" style="margin:0">Team and player simulations run for upcoming games only.</p></div>`;
+  return `<div class="grid2">
+    <div class="panel"><h3 style="margin:0 0 10px;font-size:.95rem">The pick</h3>
+      <div class="kv"><span class="h"></span><span class="h" style="text-align:right">${esc(g.away_team)}</span><span class="h" style="text-align:right">${esc(g.home_team)}</span>
+      <span>Model win chance</span><b>${pct(1 - g.p_model)}</b><b>${pct(g.p_model)}</b>
+      <span>Vegas (no-vig)</span><b>${pct(g.p_market == null ? null : 1 - g.p_market)}</b><b>${pct(g.p_market)}</b>
+      <span>Kalshi mid</span><b>${pct(k && k.kalshi_home_mid != null ? 1 - k.kalshi_home_mid : null)}</b><b>${pct(k && k.kalshi_home_mid)}</b>
+      <span>Projected score</span><b>${g.pred_away_pts != null ? g.pred_away_pts.toFixed(1) : "–"}</b><b>${g.pred_home_pts != null ? g.pred_home_pts.toFixed(1) : "–"}</b></div>
+      <div class="spread" style="margin-top:10px">
+        <div class="row"><span class="k">Model margin</span><b>${esc(modelMargin(g))}</b></div>
+        <div class="row"><span class="k">Vegas spread</span><b>${esc(vegasLine(g))}</b></div>
+        ${lean ? `<div class="row"><span class="k">Spread lean</span><b>${esc(lean.label)} · ${pct(lean.p)}</b></div>` : ""}
+        <div class="row"><span class="k">Total</span><b>${g.pred_total != null ? g.pred_total.toFixed(1) : "–"}${g.total_line != null ? " · Vegas " + g.total_line : ""}</b></div>
+      </div></div>
+    ${proj}
+    <div class="panel" style="grid-column:1/-1">${contextBlock(g)}</div>
+  </div>`;
+}
+
+function statsTab(g) {
+  if (!TSTATS) return `<p class="empty">Team stats are not available yet.</p>`;
+  const A = TSTATS.teams[g.away_team], H = TSTATS.teams[g.home_team], n = TSTATS.n_teams || 32;
+  if (!A || !H) return `<p class="empty">Team stats are not available for this game.</p>`;
+  let body = "", grp = "";
+  for (const s of TSTATS.stats) {
+    if (s.group !== grp) { grp = s.group; body += `<tr class="grp"><td colspan="3">${esc(grp)}</td></tr>`; }
+    const a = A[s.key], h = H[s.key];
+    const better = a.rank < h.rank ? "a" : h.rank < a.rank ? "h" : "";
+    body += `<tr class="statrow"><td>${esc(s.label)}</td>
+      <td class="n">${better === "a" ? '<span class="edge">▲ </span>' : ""}${fmtStat(a.v, s.fmt)}${rankChip(a.rank, n)}</td>
+      <td class="n">${better === "h" ? '<span class="edge">▲ </span>' : ""}${fmtStat(h.v, s.fmt)}${rankChip(h.rank, n)}</td></tr>`;
+  }
+  return `<p class="note" style="margin:0">Pregame ratings: 7-game weighted averages in competitive situations. Chips show league rank (1 is best). ▲ marks the better side.</p>
+    <div class="panel scroll"><table><thead><tr><th>Stat</th><th class="n">${esc(g.away_team)}</th><th class="n">${esc(g.home_team)}</th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function propsTab(g) {
+  const pr = PROPS[g.game_id];
+  if (!pr) return `<p class="empty">Player props are simulated for upcoming games. This game has been played.</p>`;
+  const side = SHEET.team === g.home_team ? "home" : "away";
+  const team = side === "home" ? g.home_team : g.away_team;
+  const P = pr[side].players;
+  const nm = p => `<td class="p">${esc(p.name)}<small>${esc(p.pos)}</small>${p.questionable ? '<span class="q">Q</span>' : ""}</td>`;
+  const td = p => `<td class="n"><span class="m">${pct(p.anytime_td)}</span></td>`;
+  const qbs = P.filter(p => p.pos === "QB");
+  const rush = P.filter(p => p.rush_att && p.rush_att.median >= 2 && p.pos !== "QB").sort((a, b) => b.rush_att.median - a.rush_att.median).slice(0, 4);
+  const recv = P.filter(p => p.pos !== "QB" && (p.rec.median >= 1 || p.rec_yds.median >= 8)).sort((a, b) => b.rec_yds.median - a.rec_yds.median).slice(0, 9);
+  const tdl = P.filter(p => p.anytime_td >= 0.03).sort((a, b) => b.anytime_td - a.anytime_td).slice(0, 10);
+  const sel = [g.away_team, g.home_team].map(t => `<button class="tsel" type="button" data-team="${esc(t)}" aria-pressed="${t === team}">${esc(t)}</button>`).join("");
+  const tbl = (head, rows) => rows ? `<div class="panel scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>` : "";
+  return `<div class="props" style="display:grid;gap:12px"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${sel}</div>
+    <p class="note" style="margin:0">Each number is the <b>median</b> of ${pr.n_sims.toLocaleString()} simulated games, which is the fair line: half of outcomes land above it and half below. The small range is the middle 50% of outcomes.</p>
+    <h3 class="sublabel" style="margin:4px 0 0">Passing</h3>
+    ${tbl(`<th>Player</th><th class="n">Pass yds</th><th class="n">Completions</th><th class="n">Attempts</th><th class="n">Pass TD</th><th class="n">INT</th><th class="n">Rush yds</th>`,
+      qbs.map(p => `<tr>${nm(p)}${cell(p.pass_yds, 1)}${cell(p.comp)}${cell(p.pass_att)}${cell(p.pass_td)}${cell(p.ints)}${cell(p.rush_yds, 1)}</tr>`).join(""))}
+    <h3 class="sublabel" style="margin:4px 0 0">Rushing</h3>
+    ${tbl(`<th>Player</th><th class="n">Rush yds</th><th class="n">Attempts</th><th class="n">Rush + rec yds</th><th class="n">Anytime TD</th>`,
+      [...qbs, ...rush].map(p => `<tr>${nm(p)}${cell(p.rush_yds, 1)}${cell(p.rush_att)}${cell(p.rush_rec_yds, 1)}${td(p)}</tr>`).join(""))}
+    <h3 class="sublabel" style="margin:4px 0 0">Receiving</h3>
+    ${tbl(`<th>Player</th><th class="n">Rec yds</th><th class="n">Receptions</th><th class="n">Targets</th><th class="n">Anytime TD</th>`,
+      recv.map(p => `<tr>${nm(p)}${cell(p.rec_yds, 1)}${cell(p.rec)}${cell(p.targets)}${td(p)}</tr>`).join(""))}
+    <h3 class="sublabel" style="margin:4px 0 0">Touchdown scorers</h3>
+    ${tbl(`<th>Player</th><th class="n">Anytime TD</th><th class="n">Fair odds</th>`,
+      tdl.map(p => `<tr>${nm(p)}${td(p)}<td class="n">${americanOdds(p.anytime_td)}</td></tr>`).join(""))}</div>`;
+}
+function americanOdds(p) {
+  if (!p || p <= 0 || p >= 1) return "–";
+  return p >= 0.5 ? "−" + Math.round(100 * p / (1 - p)) : "+" + Math.round(100 * (1 - p) / p);
+}
+
+function renderSheet() {
+  const g = GAMES[SHEET.game];
+  if (!g) return;
+  const pick = pickTeam(g);
+  document.getElementById("sheetTitle").textContent = `${g.away_team} at ${g.home_team}`;
+  const pr = PROPS[g.game_id];
+  const pts = (side, model) => pr ? pr[side].team.points.median.toFixed(0) : (model != null ? model.toFixed(0) : "–");
+  const tabs = [["overview", "Overview"], ["stats", "Team stats"], ["props", "Player props"]];
+  const body = SHEET.tab === "stats" ? statsTab(g) : SHEET.tab === "props" ? propsTab(g) : overviewTab(g);
+  document.getElementById("sheetBody").innerHTML = `
+    <div class="hero">
+      <div class="tm"><span class="lbl">Away</span><span class="ab ${pick === g.away_team ? "picked-ab" : ""}">${esc(g.away_team)}</span><span class="pts">${g.status === "final" ? g.away_score : pts("away", g.pred_away_pts)}</span><span class="lbl">${esc(g.away_qb_name || "")}</span></div>
+      <div class="vs">${g.status === "final" ? "Final" : "Proj."}</div>
+      <div class="tm"><span class="lbl">Home</span><span class="ab ${pick === g.home_team ? "picked-ab" : ""}">${esc(g.home_team)}</span><span class="pts">${g.status === "final" ? g.home_score : pts("home", g.pred_home_pts)}</span><span class="lbl">${esc(g.home_qb_name || "")}</span></div>
+    </div>
+    ${pickBox(g, g.status === "final" ? "Model picked:" : "Model pick:")}
+    <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${SHEET.tab === k}">${l}</button>`).join("")}</div>
+    <div role="tabpanel" style="display:grid;gap:12px">${body}</div>`;
+}
+
+function openGame(id, tab) {
+  if (!GAMES[id]) return;
+  SHEET = {game: id, tab: tab || "overview", team: SHEET.game === id ? SHEET.team : GAMES[id].away_team};
+  renderSheet();
+  const s = document.getElementById("sheet");
+  s.hidden = false; s.scrollTop = 0;
+  document.body.style.overflow = "hidden";
+  if (location.hash !== "#g-" + id) history.replaceState(null, "", "#g-" + id);
+  document.getElementById("sheetClose").focus();
+}
+function closeGame() {
+  const id = SHEET.game;
+  document.getElementById("sheet").hidden = true;
+  document.body.style.overflow = "";
+  SHEET.game = null;
+  history.replaceState(null, "", location.pathname + location.search);
+  const b = document.querySelector(`.open[data-game="${id}"]`);
+  if (b) b.focus();
+}
+document.addEventListener("click", e => {
+  const o = e.target.closest(".open"); if (o) return openGame(o.dataset.game);
+  const t = e.target.closest(".tab"); if (t) { SHEET.tab = t.dataset.tab; return renderSheet(); }
+  const s = e.target.closest(".tsel"); if (s) { SHEET.team = s.dataset.team; return renderSheet(); }
+  if (e.target.closest("#sheetClose")) return closeGame();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape" && SHEET.game) closeGame(); });
 
 function lineChart(rows) {
   const W = 420, H = 210, L = 44, R = 10, T = 10, B = 26;
@@ -289,10 +482,13 @@ function calChart(cal) {
 }
 
 (async () => {
-  const [preds, bt, meta, kal, inj] = await Promise.all([
-    load("predictions", []), load("backtest", null), load("meta", {}), load("kalshi_latest", {games: []}), load("injuries", {})]);
-  INJ = inj || {};
+  const [preds, bt, meta, kal, inj, props, ts] = await Promise.all([
+    load("predictions", []), load("backtest", null), load("meta", {}), load("kalshi_latest", {games: []}), load("injuries", {}),
+    load("props", {}), load("teamstats", null)]);
+  INJ = inj || {}; PROPS = props || {}; TSTATS = ts;
+  GAMES = Object.fromEntries(preds.map(g => [g.game_id, g]));
   const kmap = Object.fromEntries((kal.games || []).map(k => [k.game_id, k]));
+  KMAP = kmap;
   document.getElementById("meta").innerHTML =
     `<span>Model updated ${esc((meta.updated || "").replace("T", " ").replace("+00:00", " UTC"))}</span>` +
     `<span>Kalshi ${kal.updated ? "checked " + esc(kal.updated.replace("T", " ").replace("+00:00", " UTC")) : "not checked yet"}</span>`;
@@ -330,6 +526,8 @@ function calChart(cal) {
     document.getElementById("seasonChart").innerHTML = lineChart(bt.by_season);
     document.getElementById("calChart").innerHTML = calChart(bt.calibration);
   }
+  const m = location.hash.match(/^#g-([A-Za-z0-9_]+)$/);
+  if (m && GAMES[m[1]]) openGame(m[1]);
 
 })();
 </script>
