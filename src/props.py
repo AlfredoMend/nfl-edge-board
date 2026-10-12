@@ -351,7 +351,9 @@ def simulate_game(game: dict, home: dict, away: dict, vol: dict, lg: dict, n: in
                            "rush_att": _quant(r["carries"]), "rush_yds": _quant(r["rush_yds"]),
                            "rush_rec_yds": _quant(r["rush_yds"] + r["rec_yds"])}
             tds = r["rec_td"] + r["rush_td"]
+            row["dist"]["tds"] = _quant(tds)
             row["td_2plus"] = float((tds >= 2).mean())
+            row["td_3plus"] = float((tds >= 3).mean())
             row["first_td_share"] = None
             if "pass_yds" in r:
                 row["dist"].update({"pass_yds": _quant(r["pass_yds"]), "pass_td": _quant(r["pass_td"]),

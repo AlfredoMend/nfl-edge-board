@@ -31,8 +31,9 @@ SERIES = {
     "KXNFLREC": ("rec", "receptions"), "KXNFLRECPROT": ("rec", "receptions"),
     "KXNFLRECYDS": ("rec_yds", "receiving yards"), "KXNFLRECYDSPROT": ("rec_yds", "receiving yards"),
     "KXNFLRRYDS": ("rush_rec_yds", "rush + rec yards"),
-    "KXNFLANYTD": ("anytime_td", "anytime TD"), "KXNFLTD": ("anytime_td", "anytime TD"),
-    "KXNFLTDPROT": ("anytime_td", "anytime TD"), "KXNFL2TD": ("td_2plus", "2+ TDs"),
+    # TD series are ladders (1+, 2+, 3+ touchdowns); the threshold comes from each contract
+    "KXNFLANYTD": ("tds", "TDs"), "KXNFLTD": ("tds", "TDs"), "KXNFLTDPROT": ("tds", "TDs"),
+    "KXNFL2TD": ("tds", "TDs"),
 }
 KALSHI_CODE = {"LA": ["LAR", "LA"], "JAX": ["JAC", "JAX"], "WAS": ["WSH", "WAS"], "LV": ["LV", "LVR"]}
 MIN_EDGE = 0.03          # show plays where the model sees at least 3 cents of value per contract
@@ -131,15 +132,29 @@ def main():
                 continue
             side, pid = hit
             pl = dist[g.game_id][side][pid]
-            if stat in ("anytime_td", "td_2plus"):
-                p = pl[stat]
-                line = 1 if stat == "anytime_td" else 2
+            fs = m.get("floor_strike")
+            if fs is None:
+                suffix = m["ticker"].rsplit("-", 1)[-1]
+                if stat == "tds" and suffix.isdigit():
+                    fs = int(suffix) - 0.5
+                elif series == "KXNFL2TD":
+                    fs = 1.5
+                elif series == "KXNFLANYTD":
+                    fs = 0.5
+                else:
+                    continue
+            line = int(round(float(fs) + 0.5))
+            if stat == "tds":
+                exact = {1: pl.get("anytime_td"), 2: pl.get("td_2plus"), 3: pl.get("td_3plus")}.get(line)
+                if exact is None:
+                    if "tds" not in pl["dist"]:
+                        continue
+                    exact = p_at_least(pl["dist"]["tds"], float(fs))
+                p = float(exact)
             else:
-                fs = m.get("floor_strike")
-                if fs is None or stat not in pl["dist"]:
+                if stat not in pl["dist"]:
                     continue
                 p = p_at_least(pl["dist"][stat], float(fs))
-                line = int(round(float(fs) + 0.5))
             ya, na, yb = _price(m, "yes_ask"), _price(m, "no_ask"), _price(m, "yes_bid")
             ev_yes = p - ya - _fee(ya) if ya else None
             ev_no = (1 - p) - na - _fee(na) if na else None
@@ -147,7 +162,8 @@ def main():
             team = g.home_team if side == "home" else g.away_team
             rows.append({"game_id": g.game_id, "ticker": m["ticker"], "player": pl["name"], "team": team,
                          "market": label, "stat": stat, "line": line,
-                         "contract": f"{pl['name']}: {line}+ {label}" if stat != "anytime_td" else f"{pl['name']}: anytime TD",
+                         "contract": (f"{pl['name']}: anytime TD" if (stat == "tds" and line == 1)
+                                      else f"{pl['name']}: {line}+ {label}"),
                          "protected": series.endswith("PROT"), "model_p": round(p, 4),
                          "yes_bid": yb, "yes_ask": ya, "no_ask": na,
                          "kalshi_mid": round((yb + ya) / 2, 3) if yb and ya else None,

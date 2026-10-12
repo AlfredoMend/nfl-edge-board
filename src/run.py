@@ -136,7 +136,7 @@ def main():
             from props import project_week
             pr = project_week(sched, upcoming, refresh=refresh)
             dist = {gid: {side: {p["id"]: {"name": p["name"], "dist": p["dist"], "anytime_td": p["anytime_td"],
-                                           "td_2plus": p["td_2plus"]} for p in g[side]["players"]}
+                                           "td_2plus": p["td_2plus"], "td_3plus": p["td_3plus"]} for p in g[side]["players"]}
                           for side in ("home", "away")} for gid, g in pr.items()}
             (OUT / "props_dist.json").write_text(json.dumps(dist))
             for g in pr.values():
