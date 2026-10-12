@@ -41,6 +41,10 @@ jobs:
         continue-on-error: true
         run: python src/kalshi.py
 
+      - name: Discover Kalshi player-prop markets
+        continue-on-error: true
+        run: python src/kalshi_discover.py
+
       - name: Commit updated data
         run: |
           git config user.name "nfl-model-bot"
