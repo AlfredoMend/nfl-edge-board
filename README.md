@@ -67,6 +67,10 @@ Paper betting every game where the model beat the no-vig line by 3+ points of pr
 
 The model is well calibrated and beats plain Elo, but closing lines are still sharper. That is the normal starting point. The Kalshi comparison is where it gets interesting, because Kalshi prices earlier in the week are often softer than Vegas closing lines. `data/kalshi_history.csv` logs every snapshot so that can be measured properly after a few weeks.
 
+## Spreads
+
+The ensemble's win probability is converted to a predicted point margin (scale fit on past games). Each game shows the model margin, the Vegas spread, which side the model leans and its cover chance. Kalshi spread contracts (`KXNFLSPREAD`, e.g. "Buffalo wins by over 2.5") are priced the same way and the best contract after fees is shown. Against the spread since 2012 the model hits about 51%, short of the 52.4% needed at -110, so treat spread leans as information rather than bets for now.
+
 ## Ideas for v2
 
 - Injury report features (nflverse `injuries` data)

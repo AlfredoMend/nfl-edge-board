@@ -22,6 +22,8 @@ FIRST_TEST = 2012       # earlier seasons are training-only
 FIRST_OOF = 2009        # out-of-sample base predictions start here (to train the stacker)
 TRAIN_FROM = 2007       # 2006 has no prior-form history
 SPREAD_SD = 13.45       # NFL margin standard deviation vs the spread
+COVER_SD = 13.0         # spread of actual margins around a good point prediction
+BREAKEVEN_110 = 110 / 210  # win rate needed at standard -110 spread odds
 
 
 def american_to_prob(ml):
@@ -133,6 +135,37 @@ def backtest(f: pd.DataFrame, current_season: int):
     return bt, (weights, scale)
 
 
+def fit_margin_scale(bt: pd.DataFrame) -> float:
+    """Turn win probability into a point margin: margin = scale * probit(p).
+    The scale is picked to minimize absolute error on past games."""
+    z = norm.ppf(np.clip(bt.p_model, 0.01, 0.99))
+    grid = np.arange(8.0, 16.01, 0.25)
+    errs = [np.mean(np.abs(bt.result - g * z)) for g in grid]
+    return float(grid[int(np.argmin(errs))])
+
+
+def add_spread_view(df: pd.DataFrame, scale: float) -> pd.DataFrame:
+    """Predicted home margin, and the chance the home team covers the Vegas line.
+    nflverse spread_line is the home team's expected margin (positive = home favored)."""
+    df = df.copy()
+    df["pred_margin"] = scale * norm.ppf(np.clip(df.p_model, 0.01, 0.99))
+    df["p_home_cover"] = norm.cdf((df.pred_margin - df.spread_line) / COVER_SD)
+    return df
+
+
+def ats_summary(bt: pd.DataFrame) -> dict:
+    d = bt[bt.spread_line.notna() & (bt.result != bt.spread_line)]
+    conf = np.maximum(d.p_home_cover, 1 - d.p_home_cover)
+    won = np.where(d.p_home_cover > 0.5, d.result > d.spread_line, d.result < d.spread_line)
+    tiers = []
+    for t in (0.5, 0.55, 0.58):
+        m = conf > t
+        tiers.append({"min_confidence": t, "picks": int(m.sum()), "win_rate": float(won[m].mean()) if m.sum() else 0.0})
+    return {"model_mae": float(np.mean(np.abs(bt.result - bt.pred_margin))),
+            "vegas_mae": float(np.mean(np.abs(bt.result - bt.spread_line))),
+            "breakeven": BREAKEVEN_110, "tiers": tiers}
+
+
 def summarize(bt: pd.DataFrame, stack, edge: float = 0.03) -> dict:
     y = bt.home_win.to_numpy()
     score = lambda c: {"brier": brier(bt[c].to_numpy(), y), "logloss": logloss(bt[c].to_numpy(), y),
@@ -168,7 +201,7 @@ def summarize(bt: pd.DataFrame, stack, edge: float = 0.03) -> dict:
                "roi": float(pnl.sum() / n_bets) if n_bets else 0.0,
                "win_rate": float(((pnl > 0).sum()) / n_bets) if n_bets else 0.0,
                "seasons": f"{int(d.season.min())}-{int(d.season.max())}"}
-    return {"overall": overall, "members": members, "stack_scale": stack[1], "by_season": by_season, "calibration": cal, "betting": betting,
+    return {"overall": overall, "ats": ats_summary(bt), "members": members, "stack_scale": stack[1], "by_season": by_season, "calibration": cal, "betting": betting,
             "test_games": int(len(bt))}
 
 
@@ -202,17 +235,23 @@ def run(f: pd.DataFrame, current_season: int):
     f = f.copy()
     f["p_elo"] = 1 / (1 + 10 ** (-f.elo_diff / 400))
     bt, stack = backtest(f, current_season)
+    scale = fit_margin_scale(bt)
+    bt = add_spread_view(bt, scale)
     summary = summarize(bt, stack)
+    summary["margin_scale"] = scale
     fut, week = week_games(f, bt, stack, current_season)
+    if len(fut):
+        fut = add_spread_view(fut, scale)
 
     OUT.mkdir(parents=True, exist_ok=True)
     cols = ["game_id", "season", "week", "game_type", "gameday", "gametime", "away_team", "home_team",
             "home_moneyline", "away_moneyline", "spread_line", "p_model", "p_market",
-            "status", "home_score", "away_score", "home_win"] + [f"b_{b}" for b in BASES]
+            "status", "home_score", "away_score", "home_win", "pred_margin", "p_home_cover"] + [f"b_{b}" for b in BASES]
     preds = fut[cols].copy() if len(fut) else pd.DataFrame(columns=cols)
     preds["gameday"] = preds.gameday.astype(str)
     meta = {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"),
-            "season": current_season, "week": week, "features": FEATURES}
+            "season": current_season, "week": week, "features": FEATURES,
+            "margin_scale": scale, "cover_sd": COVER_SD}
     (OUT / "predictions.json").write_text(preds.to_json(orient="records"))
     (OUT / "season_results.json").unlink(missing_ok=True)
     (OUT / "backtest.json").write_text(json.dumps(summary, indent=1))
