@@ -101,7 +101,7 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
 
   <section>
     <h2>The ensemble</h2>
-    <p class="note" style="margin:0 0 12px">Six models each predict every game. Their weights are fit on out-of-sample predictions only, and a model gets zero weight when the others already cover what it knows.</p>
+    <p class="note" style="margin:0 0 12px">Seven models each predict every game. Their weights are fit on out-of-sample predictions only, and a model gets zero weight when the others already cover what it knows.</p>
     <div class="panel scroll" id="lineup"></div>
   </section>
 
@@ -112,7 +112,8 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
 
   <section>
     <h2>How it works</h2>
-    <p class="note">Data comes from nflverse play-by-play (2006 to now). Each game gets pregame-only features: Elo ratings, decayed offensive and defensive EPA per play and success rate, a quarterback rating built from the starter's dropback EPA, rest, and a few game flags. Six models (logistic regression, LightGBM, a point-margin regression, extra trees, a small neural net, and Elo) are combined in a stacked ensemble. A scheduled job refreshes data and predictions every week and snapshots Kalshi prices several times a day, logging them so the model can be graded against the exact prices that were available.</p>
+    <p class="note">Data comes from nflverse play-by-play (2006 to now). Team stats only count plays in competitive situations (win probability 20 to 80%, or the first three quarters within 14 points), so garbage time does not distort them. No yards per game, points per game or raw turnover counts are used. Features include opponent-adjusted EPA per pass and rush (a weekly ridge regression on offense and defense), success rate, early-down EPA, explosive play rate, CPOE, depth of target, yards after catch per target, pressure rate and EPA under pressure, turnover-worthy pass and fumble rates, red-zone touchdown rate regressed to the league median, a starting quarterback rating and how it compares to his team, rest, travel miles, time-zone shifts, wind and cold. Recent games count more through a 7-game exponential moving average.</p>
+    <p class="note">The models learn neutral-site team strength, then home field is added back as a fixed 1.2 to 1.8 points. Every season in the backtest is predicted only from earlier seasons and scored against sportsbook closing lines.</p>
     <p class="note">Projected scores come from a separate total-points model built on each team's recent scoring, efficiency and quarterback play, split between the teams using the predicted margin.</p>
     <p class="note">The predicted margin comes from the ensemble's win probability, scaled to points using past games. Spread contracts on Kalshi are priced the same way: the chance a team wins by more than the line, compared to the ask price after fees.</p>
     <p class="note">Kalshi edge is the model's chance minus the ask price minus Kalshi's taker fee. Positive means the model thinks that contract is cheap. Paper results only.</p>
@@ -208,7 +209,7 @@ function spreadBlock(g, k) {
   return `<div class="spread">${rows}${pill}</div>`;
 }
 
-const MEMBERS = ["logit", "gbm", "margin", "trees", "mlp", "elo"];
+const MEMBERS = ["logit", "xgb", "lgbm", "margin", "trees", "mlp", "elo"];
 function rangeLine(g) {
   const v = MEMBERS.map(k => g["b_" + k]).filter(x => x != null && !isNaN(x));
   if (!v.length) return "";
@@ -287,8 +288,10 @@ function calChart(cal) {
       [(o.vegas.accuracy * 100).toFixed(1) + "%", "Vegas favorite correct"],
       [(b.roi * 100).toFixed(1) + "%", `Paper ROI, ${b.bets.toLocaleString()} bets at ${b.edge_threshold * 100}%+ edge`],
       ...(bt.ats ? [[(bt.ats.tiers[0].win_rate * 100).toFixed(1) + "%", `Against the spread (${(bt.ats.breakeven * 100).toFixed(1)}% needed to profit)`],
-                    [bt.ats.model_mae.toFixed(1) + " pts", `Model margin error, Vegas ${bt.ats.vegas_mae.toFixed(1)} pts`]] : []),
-      ...(bt.totals ? [[bt.totals.model_mae.toFixed(1) + " pts", `Model total-points error, Vegas ${bt.totals.vegas_mae.toFixed(1)} pts`]] : [])
+                    [bt.ats.model_rmse.toFixed(2), `Spread RMSE vs result (closing line ${bt.ats.vegas_rmse.toFixed(2)})`]] : []),
+      ...(bt.totals ? [[bt.totals.model_rmse.toFixed(2), `Total RMSE vs result (closing line ${bt.totals.vegas_rmse.toFixed(2)})`]] : []),
+      ...(bt.clv && bt.clv.games ? [[(bt.clv.avg_cents >= 0 ? "+" : "") + bt.clv.avg_cents.toFixed(1) + "¢", `Kalshi closing line value, ${bt.clv.games} games, ${Math.round(bt.clv.beat_close_rate * 100)}% beat the close`]]
+                                 : [["–", "Kalshi closing line value (builds as games are logged)"]])
     ].map(([v, l]) => `<div class="tile"><b>${v}</b><span>${l}</span></div>`).join("") +
     `<p class="note" style="grid-column:1/-1;margin:0">${bt.test_games.toLocaleString()} games from ${bt.by_season[0].season} to ${bt.by_season.at(-1).season}, each predicted out of sample.</p>`;
     if (bt.members) {

@@ -1,80 +1,56 @@
 # NFL Edge Board
 
-An NFL win-probability model built from scratch, compared against Vegas closing lines and live Kalshi prices, with a website that updates itself.
+An unbiased NFL prediction model (win probability, point spread, total) built on situation-neutral efficiency metrics, compared against sportsbook closing lines and live Kalshi prices, with a website that updates itself.
 
-## What runs where
+Live site: https://alfredomend.github.io/nfl-edge-board/
 
-| Piece | File | When it runs |
+## Layout
+
+| File | Job |
+|---|---|
+| `src/data.py` | Downloads nflfastR play-by-play and schedules (nflverse releases), applies the situation-neutral filter, aggregates per team per game |
+| `src/features.py` | Exponential moving averages, opponent adjustment, red-zone regression, QB isolation, rest, travel, weather |
+| `src/geo.py` | Stadium coordinates and time zones for travel and body-clock features |
+| `src/train.py` | Base models (logistic, XGBoost, LightGBM, ridge, extra trees, neural net, Elo), neutral-site stacking, home field, totals |
+| `src/backtest.py` | Walk-forward time-series evaluation against closing lines, closing line value on Kalshi |
+| `src/run.py` | Runs everything and writes `site/data/*.json` |
+| `src/kalshi.py` | Snapshots Kalshi moneyline and spread prices and prices them with the model |
+| `.github/workflows/update.yml` | Runs hourly, every 30 min during games, and on every code push |
+
+## Modeling rules
+
+- **Prohibited inputs:** no passing or rushing yards per game, no points per game or points allowed per game, no raw turnover totals.
+- **No leakage:** every feature for a game is built only from earlier games. The backtest predicts each season with models, stacking weights and home-field values fit only on earlier seasons.
+- **Situation-neutral:** efficiency stats use only plays with win probability between 20% and 80%, or quarters 1 to 3 with the score within 14.
+- **Volatile outcomes regressed:** turnovers are modeled through turnover-worthy proxies (passes intercepted or broken up per attempt, all fumbles per play, forced fumbles per play). Red-zone touchdown rate is shrunk toward the prior season's league median with 20 trips of prior weight.
+
+## Features
+
+- **Efficiency:** EPA per pass and per rush, success rate, early-down (1st and 2nd) EPA, explosive play rate (EPA above 1.5), offense and defense
+- **Passing:** CPOE, average depth of target, yards after catch per target, pressure rate and EPA under pressure vs clean pocket (pressure = sack or QB hit, the best signal available in nflfastR), starting QB EPA per dropback and its gap to the team's passing baseline
+- **Transformations:** 7-game exponential moving average weighted by neutral plays, regressed halfway to league average each offseason. Weekly ridge regression of EPA on offense and defense identity for opponent-adjusted ratings.
+- **Context:** rest difference, travel miles, time-zone shift and eastward travel, wind above 15 mph, temperature below 25°F, division and playoff games
+- **Home field:** models are trained on each game in both directions (home and away swapped), so they learn neutral-site strength. Home field is then added as a single term chosen from 1.2 to 1.8 points by out-of-sample log loss.
+
+## Backtest (2012 to now, 3,893 games, all out of sample)
+
+| | Model | Closing line |
 |---|---|---|
-| Data pull (nflverse schedules + play-by-play) | `src/data.py` | Tue, Thu, Sat, Sun mornings |
-| Pregame features | `src/features.py` | same |
-| Model, backtest, predictions | `src/model.py` | same |
-| Kalshi price snapshot | `src/kalshi.py` | every 3 hours |
-| Website | `site/index.html` + `site/data/*.json` | redeployed after every run |
-| Scheduler | `.github/workflows/update.yml` | GitHub Actions |
+| Win probability Brier | 0.2189 | 0.2112 |
+| Win probability log loss | 0.6270 | 0.6099 |
+| Straight-up picks correct | 64.4% | 66.5% |
+| Spread RMSE (points) | 13.26 | 12.94 |
+| Total RMSE (points) | 13.53 | 13.26 |
+| Against the spread | 49.9% (52.4% needed) | |
+| Over/under | 50.8% (52.4% needed) | |
 
-Nothing runs on your laptop. GitHub Actions does the work and GitHub Pages hosts the site, both free for a public repo.
-
-## Deploy (about 5 minutes, one time)
-
-1. Create an empty **public** repo on GitHub, for example `nfl-edge-board`.
-2. Push this folder to it:
-   ```bash
-   cd nfl-model
-   git remote add origin https://github.com/<your-username>/nfl-edge-board.git
-   git push -u origin main
-   ```
-3. In the repo go to **Settings → Pages** and set **Source** to **GitHub Actions**.
-4. Go to **Actions → Update model, Kalshi prices, and website → Run workflow**.
-
-When it finishes, the site is live at `https://<your-username>.github.io/nfl-edge-board/`. After that it updates on its own schedule.
-
-No Kalshi API key is needed. The script only reads public market prices.
+Closing lines remain sharper, as expected. Closing line value against Kalshi is tracked from `data/clv_log.csv` as games are logged.
 
 ## Run locally
 
 ```bash
 pip install -r requirements.txt
-python src/run.py --refresh   # data, features, backtest, predictions
-python src/kalshi.py          # Kalshi prices (needs normal internet access)
-python -m http.server -d site # open http://localhost:8000
+python src/run.py --refresh
+python src/kalshi.py
+python -m http.server -d site
 ```
-
-## The model
-
-**Features** (all computed from games played before kickoff):
-- Elo ratings with margin-of-victory scaling and offseason regression
-- Exponentially decayed offensive and defensive EPA per play, success rate, pass EPA, rush EPA (garbage time removed)
-- Matchup term: each offense against the opposing defense
-- Starting QB rating: shrunk, decayed dropback EPA for the listed starter, so backups and rookies start near replacement level
-- QB change flag, rest difference, neutral site, division game, playoffs, early season
-
-**Models:** a stacked ensemble of six models (logistic regression, LightGBM, point-margin ridge regression, extra trees, a small neural net, Elo). Weights are non-negative, sum to 1, and are fit only on earlier seasons' out-of-sample predictions.
-
-**Backtest:** walk-forward by season. Every season from 2012 on is predicted by a model trained only on earlier seasons, so all results are out of sample.
-
-## First results (3,893 games, 2012 to Week 5 of 2026)
-
-| | Brier ↓ | Log loss ↓ | Picks correct |
-|---|---|---|---|
-| Stacked ensemble (6 models) | 0.2171 | 0.623 | 65.2% |
-| Logistic only | 0.2176 | 0.624 | 64.9% |
-| LightGBM only | 0.2201 | 0.630 | 65.0% |
-| Elo only | 0.2204 | 0.631 | 64.5% |
-| Vegas closing line (no-vig) | 0.2112 | 0.610 | 66.5% |
-
-Paper betting every game where the model beat the no-vig line by 3+ points of probability: 2,699 bets, about **−3.8% ROI** at real moneyline odds.
-
-The model is well calibrated and beats plain Elo, but closing lines are still sharper. That is the normal starting point. The Kalshi comparison is where it gets interesting, because Kalshi prices earlier in the week are often softer than Vegas closing lines. `data/kalshi_history.csv` logs every snapshot so that can be measured properly after a few weeks.
-
-## Spreads
-
-The ensemble's win probability is converted to a predicted point margin (scale fit on past games). Each game shows the model margin, the Vegas spread, which side the model leans and its cover chance. Kalshi spread contracts (`KXNFLSPREAD`, e.g. "Buffalo wins by over 2.5") are priced the same way and the best contract after fees is shown. Against the spread since 2012 the model hits about 51%, short of the 52.4% needed at -110, so treat spread leans as information rather than bets for now.
-
-## Ideas for v2
-
-- Injury report features (nflverse `injuries` data)
-- Weather and wind for outdoor games
-- Use Kalshi price history to test entry timing (early week vs. game day)
-- Tune the model on Brier score with a validation season instead of fixed settings
-- Spread and totals models using the same features

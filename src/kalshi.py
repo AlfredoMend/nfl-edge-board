@@ -173,6 +173,10 @@ def main():
     preds = pd.read_json(ROOT / "site" / "data" / "predictions.json")
     if "status" in preds:
         preds = preds[preds.status == "upcoming"]
+    # Only price games that have not kicked off (Kalshi markets keep trading in-game)
+    kick = pd.to_datetime(preds.gameday.astype(str).str[:10] + " " + preds.gametime.fillna("13:00"))
+    kick = kick.dt.tz_localize("America/New_York").dt.tz_convert("UTC")
+    preds = preds[kick > pd.Timestamp.now(tz="UTC")]
     snap = snapshot()
     hist = ROOT / "data" / "kalshi_history.csv"
     snap.to_csv(hist, mode="a", header=not hist.exists(), index=False)
@@ -189,6 +193,10 @@ def main():
         print(f"{len(spr)} spread markets")
     except Exception as e:  # spreads are extra: never let them break the moneyline snapshot
         print("spread snapshot failed:", e)
+    if len(matched):
+        clv = matched[["game_id", "snapshot_utc", "kalshi_home_mid"]].merge(preds[["game_id", "p_model"]], on="game_id")
+        cpath = ROOT / "data" / "clv_log.csv"
+        clv.to_csv(cpath, mode="a", header=not cpath.exists(), index=False)
     payload = {"updated": datetime.now(timezone.utc).isoformat(timespec="minutes"),
                "markets_seen": int(len(snap)), "games": list(games.values())}
     (ROOT / "site" / "data" / "kalshi_latest.json").write_text(json.dumps(payload, default=str))
