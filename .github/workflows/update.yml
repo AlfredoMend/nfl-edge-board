@@ -2,10 +2,9 @@ name: Update model, Kalshi prices, and website
 
 on:
   schedule:
-    # Times are UTC. Every run refreshes data (incl. starting QBs), retrains, and checks Kalshi.
-    - cron: "7 * * * *"           # every hour, all week
-    - cron: "37 16-23 * * 0"      # plus every 30 min Sunday 9am-5pm PT
-    - cron: "37 0-5 * * 1,2,5"    # plus every 30 min Sun/Mon/Thu night games PT
+    # Times are UTC. GitHub drops many runs scheduled near the top of the hour, so these use
+    # off-peak minutes and run twice an hour; a dropped run only leaves a ~30 minute gap.
+    - cron: "19,49 * * * *"
   workflow_dispatch: {}
   push:                         # redeploy when code or page changes (not data commits)
     branches: [main]
