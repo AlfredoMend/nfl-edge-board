@@ -162,7 +162,7 @@ def main():
             ev_no = (1 - p) - na - _fee(na) if na else None
             best = max([(ev_yes, "YES", ya), (ev_no, "NO", na)], key=lambda x: -9 if x[0] is None else x[0])
             team = g.home_team if side == "home" else g.away_team
-            rows.append({"game_id": g.game_id, "ticker": m["ticker"], "player": pl["name"], "team": team,
+            rows.append({"game_id": g.game_id, "ticker": m["ticker"], "player_id": pid, "player": pl["name"], "team": team,
                          "market": label, "stat": stat, "line": line,
                          "contract": (f"{pl['name']}: anytime TD" if (stat == "tds" and line == 1)
                                       else f"{pl['name']}: {line}+ {label}"),
@@ -178,8 +178,11 @@ def main():
     df = pd.DataFrame(rows)
     if len(df):
         df = df.sort_values("best_ev", ascending=False)
-        log = df.assign(snapshot_utc=now)[["snapshot_utc", "game_id", "ticker", "model_p", "yes_bid", "yes_ask", "no_ask"]]
-        hp = ROOT / "data" / "kalshi_props_history.csv"
+        # Full log used by the results tracker (record.py) to grade flagged contracts
+        log = df.assign(snapshot_utc=now)[["snapshot_utc", "game_id", "ticker", "player_id", "player", "team", "stat",
+                                           "line", "contract", "protected", "model_p", "yes_bid", "yes_ask", "no_ask",
+                                           "best_side", "best_ev", "wide"]]
+        hp = ROOT / "data" / "kalshi_props_log.csv"
         log.to_csv(hp, mode="a", header=not hp.exists(), index=False)
     payload = {"updated": now, "markets_seen": seen, "priced": int(len(df)), "min_edge": MIN_EDGE,
                "markets": df.to_dict(orient="records") if len(df) else []}

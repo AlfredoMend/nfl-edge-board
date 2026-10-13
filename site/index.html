@@ -76,6 +76,8 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
 .ok{color:var(--good);font-weight:600} .no{color:var(--bad);font-weight:600}
 .note{font-size:.85rem;color:var(--muted);max-width:68ch}
 .empty{color:var(--muted);font-size:.9rem;padding:12px 0}
+.wrap > section, .wrap > header{min-width:0}
+#recordSec table{min-width:0}
 .open{justify-self:stretch;font:600 .85rem var(--body);color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer;text-align:left;display:flex;justify-content:space-between}
 .open:hover{border-color:var(--model);color:var(--model)}
 .open:focus-visible,.tab:focus-visible,.close:focus-visible,.tsel:focus-visible{outline:2px solid var(--model);outline-offset:2px}
@@ -131,6 +133,16 @@ td.n{font-family:var(--mono);text-align:right} th.n{text-align:right}
     <div class="meta" id="meta"></div>
   </header>
 
+  <section id="recordSec" hidden>
+    <h2>Record</h2>
+    <div class="tiles" id="recTiles"></div>
+    <p class="note" style="margin:10px 0 0" id="recNote"></p>
+    <div class="grid2" style="margin-top:12px">
+      <div class="panel scroll" id="recWeeks"></div>
+      <div class="panel scroll" id="recBets"></div>
+    </div>
+  </section>
+
   <section>
     <h2 id="weekTitle">This week</h2>
     <div class="legend">
@@ -185,10 +197,24 @@ async function load(name, fallback) {
   catch (e) { return fallback; }
 }
 
+// All times shown in Pacific. Kickoffs come from nflverse in Eastern; Pacific is always 3 hours behind
+// (both zones change for daylight saving on the same dates). Update stamps come in UTC.
+function kickoffPT(g) {
+  const [y, mo, d] = g.gameday.slice(0, 10).split("-").map(Number);
+  const [hh, mm] = (g.gametime || "13:00").split(":").map(Number);
+  return new Date(Date.UTC(y, mo - 1, d, hh - 3, mm));      // wall-clock PT stored in a UTC date object
+}
 function when(g) {
-  const d = new Date(g.gameday.slice(0, 10) + "T12:00:00");
-  const day = d.toLocaleDateString(undefined, {weekday: "short", month: "short", day: "numeric"});
-  return day + (g.gametime ? " · " + g.gametime + " ET" : "");
+  const t = kickoffPT(g);
+  const day = t.toLocaleDateString("en-US", {weekday: "short", month: "short", day: "numeric", timeZone: "UTC"});
+  const time = t.toLocaleTimeString("en-US", {hour: "numeric", minute: "2-digit", timeZone: "UTC"});
+  return g.gametime ? `${day} · ${time} PT` : day;
+}
+function stampPT(iso) {
+  if (!iso) return "";
+  const d = new Date(iso.length === 22 ? iso.replace("+00:00", ":00+00:00") : iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleString("en-US", {timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit"}) + " PT";
 }
 
 function projScore(g) {
@@ -483,6 +509,41 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && SHEET.game) closeGame(); });
 
+function wl(x, push) { return x ? `${x.w}-${x.l}${push && x.p ? "-" + x.p : ""}` : "–"; }
+function wlPct(x) { return x && x.pct != null ? (x.pct * 100).toFixed(1) + "%" : "–"; }
+function renderRecord(r) {
+  if (!r || !r.games_all) return;
+  document.getElementById("recordSec").hidden = false;
+  const G = r.games_all, K = r.kalshi && r.kalshi.all;
+  const money = v => (v >= 0 ? "+$" : "−$") + Math.abs(v).toFixed(2);
+  const tiles = [
+    [wl(G.su), `Straight up (${wlPct(G.su)})`],
+    [wl(G.ats, true), `Against the spread (${wlPct(G.ats)}, 52.4% to profit)`],
+    [wl(G.ou, true), `Totals (${wlPct(G.ou)})`],
+    K && K.settled ? [money(K.pnl), `Kalshi paper P&L, ${K.settled} settled bets (${K.won} won${K.roi != null ? ", ROI " + (K.roi * 100).toFixed(1) + "%" : ""})`]
+                   : ["–", `Kalshi paper bets: ${K ? K.open : 0} open, first results after this week's games`],
+    K && K.avg_clv != null ? [(K.avg_clv >= 0 ? "+" : "−") + Math.abs(K.avg_clv * 100).toFixed(1) + "¢", `Closing line value (${Math.round(K.beat_close * 100)}% beat the close)`]
+                           : ["–", "Closing line value (builds as bets close)"],
+  ];
+  document.getElementById("recTiles").innerHTML = tiles.map(([v, l]) => `<div class="tile"><b>${v}</b><span>${esc(l)}</span></div>`).join("");
+  const live = r.games_live && r.games_live.n, rec = r.games_reconstructed && r.games_reconstructed.n;
+  document.getElementById("recNote").textContent =
+    `${r.season} season. ${rec ? `${rec} games before tracking began are graded from the walk-forward backtest (a model trained only on earlier seasons). ` : ""}` +
+    `${live ? `${live} games graded from the model's last pregame call. ` : "Live tracking starts with Week 6: each game is graded from the model's last pregame call. "}` +
+    `Kalshi paper bets buy one $1 contract the first time a contract shows ${Math.round((r.min_edge || 0.05) * 100)}¢ or more of value before kickoff, and P&L includes Kalshi's fee. Updated ${stampPT(r.updated)}.`;
+  const weeks = (r.by_week || []).slice().reverse();
+  document.getElementById("recWeeks").innerHTML = `<table><thead><tr><th>Week</th><th class="n">Straight up</th><th class="n">Spread</th><th class="n">Total</th></tr></thead><tbody>` +
+    weeks.map(w => `<tr><td>${w.week}${w.source === "reconstructed" ? ' <small style="color:var(--muted)">backtest</small>' : ""}</td><td class="n">${wl(w.su)}</td><td class="n">${wl(w.ats, true)}</td><td class="n">${wl(w.ou, true)}</td></tr>`).join("") + `</tbody></table>`;
+  const bets = (r.bets || []).slice(0, 12);
+  const st = b => b.status === "won" ? '<b class="ok">Won</b>' : b.status === "lost" ? '<b class="no">Lost</b>' : b.status === "void" ? "Void" : "Open";
+  document.getElementById("recBets").innerHTML = bets.length ? `<table><thead><tr><th>Kalshi paper bet</th><th class="n">Price</th><th class="n">Result</th><th class="n">P&L</th><th class="n">CLV</th></tr></thead><tbody>` +
+    bets.map(b => `<tr><td>${esc(b.side)} ${esc(b.contract)}<br><small style="color:var(--muted)">${esc(b.game)} · ${esc(b.type)}</small></td>
+      <td class="n">${b.price != null ? Math.round(b.price * 100) + "¢" : "–"}</td><td class="n">${st(b)}</td>
+      <td class="n">${b.pnl != null ? (b.pnl >= 0 ? "+" : "−") + Math.abs(b.pnl * 100).toFixed(0) + "¢" : "–"}</td>
+      <td class="n">${b.clv != null ? (b.clv >= 0 ? "+" : "−") + Math.abs(b.clv * 100).toFixed(0) + "¢" : "–"}</td></tr>`).join("") + `</tbody></table>`
+    : `<p class="empty" style="padding:0">No Kalshi paper bets yet. They appear here when an edge is flagged before kickoff.</p>`;
+}
+
 function lineChart(rows) {
   const W = 420, H = 210, L = 44, R = 10, T = 10, B = 26;
   const vals = rows.flatMap(r => [r.model_brier, r.vegas_brier]);
@@ -509,16 +570,17 @@ function calChart(cal) {
 }
 
 (async () => {
-  const [preds, bt, meta, kal, inj, props, ts, kp] = await Promise.all([
+  const [preds, bt, meta, kal, inj, props, ts, kp, rec] = await Promise.all([
     load("predictions", []), load("backtest", null), load("meta", {}), load("kalshi_latest", {games: []}), load("injuries", {}),
-    load("props", {}), load("teamstats", null), load("kalshi_props", {markets: []})]);
+    load("props", {}), load("teamstats", null), load("kalshi_props", {markets: []}), load("record", null)]);
+  renderRecord(rec);
   INJ = inj || {}; PROPS = props || {}; TSTATS = ts;
   GAMES = Object.fromEntries(preds.map(g => [g.game_id, g]));
   const kmap = Object.fromEntries((kal.games || []).map(k => [k.game_id, k]));
   KMAP = kmap;
   document.getElementById("meta").innerHTML =
-    `<span>Model updated ${esc((meta.updated || "").replace("T", " ").replace("+00:00", " UTC"))}</span>` +
-    `<span>Kalshi ${kal.updated ? "checked " + esc(kal.updated.replace("T", " ").replace("+00:00", " UTC")) : "not checked yet"}</span>`;
+    `<span>Model updated ${esc(stampPT(meta.updated))}</span>` +
+    `<span>Kalshi ${kal.updated ? "checked " + esc(stampPT(kal.updated)) : "not checked yet"}</span>`;
   const byTime = (a, b) => (a.gameday + (a.gametime || "")).localeCompare(b.gameday + (b.gametime || ""));
   const todo = preds.filter(g => g.status !== "final").sort(byTime);
   const done = preds.filter(g => g.status === "final").sort(byTime);
@@ -557,7 +619,7 @@ function calChart(cal) {
   const top = (KPROPS.markets || []).filter(x => x.best_ev >= (KPROPS.min_edge || 0.03) && !x.wide).slice(0, 15);
   if ((KPROPS.markets || []).length) {
     document.getElementById("kpropsSec").hidden = false;
-    document.getElementById("kpropsNote").textContent = `Every open Kalshi player prop on an upcoming game, priced with the model's 10,000 simulations. Showing the ${top.length} contracts with at least ${Math.round((KPROPS.min_edge || 0.03) * 100)}¢ of value after fees and a tight market. Checked ${(KPROPS.updated || "").replace("T", " ").replace("+00:00", " UTC")}. Gaps of 15¢ or more are marked "check news": they usually mean an injury or role change the model has not seen yet. Treat these as leads, not locks.`;
+    document.getElementById("kpropsNote").textContent = `Every open Kalshi player prop on an upcoming game, priced with the model's 10,000 simulations. Showing the ${top.length} contracts with at least ${Math.round((KPROPS.min_edge || 0.03) * 100)}¢ of value after fees and a tight market. Checked ${stampPT(KPROPS.updated)}. Gaps of 15¢ or more are marked "check news": they usually mean an injury or role change the model has not seen yet. Treat these as leads, not locks.`;
     document.getElementById("kprops").innerHTML = top.length ? kpropTable(top, true) : `<p class="empty">No contracts clear the bar right now.</p>`;
   }
   const m = location.hash.match(/^#g-([A-Za-z0-9_]+)$/);

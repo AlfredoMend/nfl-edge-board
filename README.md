@@ -15,12 +15,13 @@ Live site: https://alfredomend.github.io/nfl-edge-board/
 | `src/players.py` | Player box scores from play-by-play (official counting rules) and team volume |
 | `src/props.py` | Player prop projections: usage x efficiency, 10,000-game Monte Carlo per game, medians |
 | `src/props_backtest.py` | Walk-forward calibration check of the prop medians on a past season |
+| `src/record.py` | Results tracker: logs pregame picks every run, grades picks and Kalshi paper bets (P&L after fees, closing line value) once games are final |
 | `src/geo.py` | Stadium coordinates and time zones for travel and body-clock features |
 | `src/train.py` | Base models (logistic, XGBoost, LightGBM, ridge, extra trees, neural net, Elo), neutral-site stacking, home field, totals |
 | `src/backtest.py` | Walk-forward time-series evaluation against closing lines, closing line value on Kalshi |
 | `src/run.py` | Runs everything and writes `site/data/*.json` |
 | `src/kalshi.py` | Snapshots Kalshi moneyline and spread prices and prices them with the model |
-| `.github/workflows/update.yml` | Runs hourly, every 30 min during games, and on every code push |
+| `.github/workflows/update.yml` | Runs every 30 minutes (external timer via cron-job.org, GitHub's schedule as backup) and on every code push |
 
 ## Modeling rules
 

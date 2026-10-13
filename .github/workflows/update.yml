@@ -44,6 +44,10 @@ jobs:
         continue-on-error: true
         run: python src/kalshi_props.py
 
+      - name: Log picks and grade the record
+        continue-on-error: true
+        run: python src/record.py
+
       - name: Commit updated data
         run: |
           git config user.name "nfl-model-bot"
