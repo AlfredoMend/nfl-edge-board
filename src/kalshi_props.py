@@ -36,7 +36,9 @@ SERIES = {
     "KXNFL2TD": ("tds", "TDs"),
 }
 KALSHI_CODE = {"LA": ["LAR", "LA"], "JAX": ["JAC", "JAX"], "WAS": ["WSH", "WAS"], "LV": ["LV", "LVR"]}
-MIN_EDGE = 0.03          # show plays where the model sees at least 3 cents of value per contract
+MIN_EDGE = 0.05          # show plays with at least 5 cents of value per contract (covers the model's
+                         # remaining calibration error of a few percentage points on props)
+CHECK_EDGE = 0.15        # edges this large usually mean news the model has not seen; flagged "check news"
 
 
 def _price(m, key):
@@ -170,7 +172,8 @@ def main():
                          "ev_yes": None if ev_yes is None else round(ev_yes, 4),
                          "ev_no": None if ev_no is None else round(ev_no, 4),
                          "best_side": best[1], "best_ev": None if best[0] is None else round(best[0], 4),
-                         "best_price": best[2], "wide": bool(yb is None or (ya and yb and ya - yb > 0.10))})
+                         "best_price": best[2], "wide": bool(yb is None or (ya and yb and ya - yb > 0.10)),
+                         "check": bool(best[0] is not None and best[0] >= CHECK_EDGE)})
     now = datetime.now(timezone.utc).isoformat(timespec="minutes")
     df = pd.DataFrame(rows)
     if len(df):

@@ -419,7 +419,7 @@ function kpropRows(list, withGame) {
     ${withGame ? `<td>${esc((GAMES[m.game_id] || {}).away_team || "")} at ${esc((GAMES[m.game_id] || {}).home_team || "")}</td>` : ""}
     <td>${esc(m.contract)}${m.protected ? ' <small style="color:var(--muted)">protected</small>' : ""}</td>
     <td class="n">${pct(m.model_p)}</td><td class="n">${cents(m.yes_ask)}</td><td class="n">${cents(m.no_ask)}</td>
-    <td class="n"><b class="${m.best_ev > 0 ? "ok" : "no"}">Buy ${m.best_side} ${evTxt(m.best_ev)}</b>${m.wide ? ' <small style="color:var(--muted)">thin</small>' : ""}</td></tr>`).join("");
+    <td class="n"><b class="${m.best_ev > 0 ? "ok" : "no"}">Buy ${m.best_side} ${evTxt(m.best_ev)}</b>${m.wide ? ' <small style="color:var(--muted)">thin</small>' : ""}${m.check ? ' <small style="color:var(--bad)">check news</small>' : ""}</td></tr>`).join("");
 }
 function kpropTable(list, withGame) {
   return `<table><thead><tr>${withGame ? "<th>Game</th>" : ""}<th>Contract (YES = player reaches it)</th><th class="n">Model</th><th class="n">YES ask</th><th class="n">NO ask</th><th class="n">Best play, value per contract</th></tr></thead><tbody>${kpropRows(list, withGame)}</tbody></table>`;
@@ -557,11 +557,8 @@ function calChart(cal) {
   const top = (KPROPS.markets || []).filter(x => x.best_ev >= (KPROPS.min_edge || 0.03) && !x.wide).slice(0, 15);
   if ((KPROPS.markets || []).length) {
     document.getElementById("kpropsSec").hidden = false;
-    document.getElementById("kpropsNote").textContent = `Every open Kalshi player prop on an upcoming game, priced with the model's 10,000 simulations. Showing the ${top.length} contracts with at least ${Math.round((KPROPS.min_edge || 0.03) * 100)}¢ of value after fees and a tight market. Checked ${(KPROPS.updated || "").replace("T", " ").replace("+00:00", " UTC")}. Large gaps usually mean the market knows something the model does not, so treat these as leads, not locks.`;
-    // Edge list paused: the receiver usage model under-projects starters (see README), so
-    // receiver and TD edges are not trustworthy until that fix is validated.
-    document.getElementById("kpropsNote").textContent = `Kalshi prop prices are being collected every run (${(KPROPS.markets || []).length} contracts priced, checked ${(KPROPS.updated || "").replace("T", " ").replace("+00:00", " UTC")}). The edge list is paused while a known bias is fixed: the model under-projects starting receivers, especially players returning from injury, which makes many receiver NO contracts look better than they are. Per-game prices remain on each game's Player props tab for reference.`;
-    document.getElementById("kprops").innerHTML = "";
+    document.getElementById("kpropsNote").textContent = `Every open Kalshi player prop on an upcoming game, priced with the model's 10,000 simulations. Showing the ${top.length} contracts with at least ${Math.round((KPROPS.min_edge || 0.03) * 100)}¢ of value after fees and a tight market. Checked ${(KPROPS.updated || "").replace("T", " ").replace("+00:00", " UTC")}. Gaps of 15¢ or more are marked "check news": they usually mean an injury or role change the model has not seen yet. Treat these as leads, not locks.`;
+    document.getElementById("kprops").innerHTML = top.length ? kpropTable(top, true) : `<p class="empty">No contracts clear the bar right now.</p>`;
   }
   const m = location.hash.match(/^#g-([A-Za-z0-9_]+)$/);
   if (m && GAMES[m[1]]) openGame(m[1]);

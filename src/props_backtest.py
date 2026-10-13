@@ -95,6 +95,16 @@ def report(df: pd.DataFrame) -> dict:
                    "pit_mean": float(d.pit.mean()), "pit_mid_half": float(d.pit.between(0.25, 0.75).mean()),
                    "mae_model": float((d.actual - d["median"]).abs().mean()),
                    "mae_naive": float((d.actual - d.naive).abs().mean()) if d.naive.notna().any() else None}
+    # by projection tier: are starters (top tiers) centered too?
+    out["tiers"] = {}
+    for mk in ("rec", "rec_yds", "rush_att", "rush_yds"):
+        d = df[df.market == mk].copy()
+        if len(d) < 50:
+            continue
+        d["tier"] = pd.qcut(d["median"].rank(method="first"), 5, labels=["lowest", "low", "mid", "high", "top"])
+        out["tiers"][mk] = {str(k): {"over": round(float((v.actual > v["median"]).mean()), 3),
+                                     "under": round(float((v.actual < v["median"]).mean()), 3),
+                                     "pit": round(float(v.pit.mean()), 3)} for k, v in d.groupby("tier", observed=True)}
     t = df[df.market == "anytime_td"]
     bins = pd.cut(t["median"], [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0])
     out["anytime_td"] = {"n": int(len(t)), "brier": float(((t["median"] - t.actual) ** 2).mean()),
@@ -107,8 +117,12 @@ def report(df: pd.DataFrame) -> dict:
 
 if __name__ == "__main__":
     season = int(sys.argv[1]) if len(sys.argv) > 1 else 2025
-    df = run(season)
-    df.to_csv(ROOT / "data" / f"props_backtest_{season}.csv", index=False)
+    tag = sys.argv[2] if len(sys.argv) > 2 else ""
+    for kv in sys.argv[3:]:            # e.g. SHARE_GAMMA=1.3
+        k, v = kv.split("=")
+        setattr(P, k, float(v))
+    df = run(season, n_sims=int(P.__dict__.get("BT_SIMS", 4000)))
+    df.to_csv(ROOT / "data" / f"props_backtest_{season}{tag}.csv", index=False)
     rep = report(df)
-    (ROOT / "data" / f"props_backtest_{season}.json").write_text(json.dumps(rep, indent=1))
+    (ROOT / "data" / f"props_backtest_{season}{tag}.json").write_text(json.dumps(rep, indent=1))
     print(json.dumps(rep, indent=1))

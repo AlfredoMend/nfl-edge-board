@@ -32,8 +32,12 @@ TEAM_HALFLIFE = 6           # team games
 MARGIN_SD = 13.0
 TOTAL_SD = 13.0
 SHARE_CONCENTRATION = 40    # Dirichlet; higher = steadier week-to-week usage
-OTHER_TARGET, OTHER_CARRY = 0.04, 0.02   # usage left for players the model does not list
-REDISTRIBUTE = 0.75         # share of a missing player's usage that goes to listed teammates
+OTHER_TARGET, OTHER_CARRY = 0.02, 0.01   # usage left for players the model does not list
+REDISTRIBUTE = 0.90         # share of a missing player's usage that goes to listed teammates
+LINEUP_GAMES = 12           # team games checked for lineup similarity
+LINEUP_POWER = 6.0          # how hard to down-weight games whose lineup differs from this one
+SHARE_GAMMA_TGT = 1.15      # >1 concentrates targets toward established starters (set on the 2024 backtest)
+SHARE_GAMMA_CAR = 1.10      # same for carries
 QB_ATT_SHARE = 0.959        # listed starters throw this share of team attempts (2022-2025); backups and early exits take the rest
 TD_SCALE = 1.12             # touchdown calibration, set on the 2024 backtest (actual/predicted 1.16) and checked on 2025
 CARRY_CONCENTRATION = 20    # carries swing more week to week than targets (game script, committees)
@@ -57,10 +61,12 @@ def _decay_weights(n: int, halflife: float) -> np.ndarray:
     return 0.5 ** (np.arange(n)[::-1] / halflife)
 
 
-def _ema(values: np.ndarray, halflife: float, prior: float = None, prior_w: float = 0.0) -> float:
+def _ema(values: np.ndarray, halflife: float, prior: float = None, prior_w: float = 0.0, extra=None) -> float:
     if len(values) == 0:
         return prior if prior is not None else 0.0
     w = _decay_weights(len(values), halflife)
+    if extra is not None:
+        w = w * np.asarray(extra, dtype=float)
     num = (w * values).sum() + (prior_w * prior if prior is not None else 0.0)
     return float(num / (w.sum() + prior_w))
 
@@ -179,16 +185,47 @@ def player_profiles(pg_hist: pd.DataFrame, tm_hist: pd.DataFrame, team: str, qb_
     if qb_id and not any(p["id"] == qb_id for p in out):
         h = pg_hist[(pg_hist.player_id == qb_id) & pg_hist.appeared].tail(40)
         out.append(_profile(qb_id, h, "QB", lg, pos_eff, questionable=False))
+    out = _lineup_reweight(out, pg_hist, tm_hist, team, lg, pos_eff)
     return [p for p in out if p["tgt"] > 0.005 or p["car"] > 0.005 or p["pos"] == "QB"]
 
 
-def _profile(pid, h, pos, lg, pos_eff, questionable):
+def _lineup_reweight(profiles, pg_hist, tm_hist, team, lg, pos_eff):
+    """Recompute usage shares, weighting each recent team game by how much of tonight's
+    active usage was on the field that day. Games where a starter sat out (and teammates
+    soaked up his targets) count less, so a returning starter gets his normal share back
+    and fill-in players lose the inflated share they had while he was out."""
+    games = tm_hist[tm_hist.team == team].game_id.tail(LINEUP_GAMES).tolist()
+    if not games:
+        return profiles
+    rows = pg_hist[(pg_hist.team == team) & pg_hist.game_id.isin(games) & pg_hist.appeared]
+    present = rows.groupby("game_id").player_id.apply(set).to_dict()
+    known = [p for p in profiles if p["pos"] != "QB" and p["id"] in set(rows.player_id)]
+    imp = {p["id"]: p["tgt"] + p["car"] for p in known}
+    total = sum(imp.values())
+    if total <= 0:
+        return profiles
+    sim = {g: sum(v for k, v in imp.items() if k in present.get(g, set())) / total for g in games}
+    out = []
+    for p in profiles:
+        h = pg_hist[(pg_hist.player_id == p["id"]) & pg_hist.appeared].tail(40)
+        if h.empty:
+            out.append(p)
+            continue
+        lw = np.where((h.team == team) & h.game_id.isin(games),
+                      h.game_id.map(sim).fillna(1.0).to_numpy(float) ** LINEUP_POWER, 1.0)
+        lw = np.maximum(lw, 0.05)
+        out.append(_profile(p["id"], h, p["pos"], lg, pos_eff, p["questionable"], lw=lw))
+    return out
+
+
+def _profile(pid, h, pos, lg, pos_eff, questionable, lw=None):
     pt, pc, pcr = POS_PRIOR[pos]
     sh = h.tail(12)
-    tgt = _ema(sh.tgt_sh.to_numpy(float), SHARE_HALFLIFE, pt, 0.5)
-    car = _ema(sh.car_sh.to_numpy(float), SHARE_HALFLIFE, pc, 0.5)
-    rzt = _ema(sh.rzt_sh.to_numpy(float), SHARE_HALFLIFE * 2, pt, 1.0)
-    rzc = _ema(sh.rzc_sh.to_numpy(float), SHARE_HALFLIFE * 2, pc, 1.0)
+    sw = None if lw is None else np.asarray(lw)[-len(sh):]
+    tgt = _ema(sh.tgt_sh.to_numpy(float), SHARE_HALFLIFE, pt, 0.5, sw)
+    car = _ema(sh.car_sh.to_numpy(float), SHARE_HALFLIFE, pc, 0.5, sw)
+    rzt = _ema(sh.rzt_sh.to_numpy(float), SHARE_HALFLIFE * 2, pt, 1.0, sw)
+    rzc = _ema(sh.rzc_sh.to_numpy(float), SHARE_HALFLIFE * 2, pc, 1.0, sw)
     # Touchdown shares over a longer window, only from games where the team scored that way
     hp, hr = h[h.has_ptd > 0].tail(24), h[h.has_rtd > 0].tail(24)
     ptd = _ema(hp.ptd_sh.to_numpy(float), 12, pt, 3.0)
@@ -217,6 +254,9 @@ def _profile(pid, h, pos, lg, pos_eff, questionable):
 
 def _normalize(players: list, key: str, other: float) -> np.ndarray:
     raw = np.array([p[key] for p in players], dtype=float)
+    gamma = SHARE_GAMMA_TGT if key == "tgt" else SHARE_GAMMA_CAR
+    if gamma != 1.0 and raw.sum() > 0:
+        raw = raw ** gamma * raw.sum() / (raw ** gamma).sum()
     s = raw.sum()
     target = 1 - other
     if s <= 0:

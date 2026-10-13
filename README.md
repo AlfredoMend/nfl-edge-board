@@ -82,18 +82,20 @@ Walk-forward check on the 2025 regular season (weeks 3 to 18, every projection m
 
 | Market | Projections | Actual over median | Actual under median | In middle 50% (target 50%) | Error, model | Error, last-4 avg |
 |---|---|---|---|---|---|---|
-| Passing yards | 471 | 50.5% | 49.5% | 50% | 59.4 | 68.6 |
-| Completions | 471 | 45.0% | 50.3% | 48% | 4.7 | 5.7 |
-| Pass attempts | 471 | 43.9% | 50.5% | 46% | 6.7 | 8.1 |
+| Passing yards | 471 | 50.5% | 49.5% | 51% | 59.3 | 68.6 |
+| Completions | 471 | 44.6% | 50.1% | 48% | 4.7 | 5.7 |
+| Pass attempts | 471 | 43.7% | 50.3% | 46% | 6.8 | 8.1 |
 | Passing TDs | 471 | 36.7% | 33.3% | 57% | 0.9 | 1.0 |
-| Rushing yards | 1,431 | 54.3% | 42.9% | 51% | 19.2 | 20.5 |
-| Rush attempts | 1,431 | 50.0% | 36.2% | 49% | 3.1 | 3.2 |
-| Receptions | 3,049 | 43.1% | 35.0% | 50% | 1.5 | 1.6 |
-| Receiving yards | 3,049 | 53.2% | 46.2% | 48% | 19.2 | 21.1 |
+| Rushing yards | 1,422 | 54.4% | 42.8% | 50% | 19.4 | 20.5 |
+| Rush attempts | 1,422 | 50.6% | 36.5% | 50% | 3.1 | 3.2 |
+| Receptions | 3,078 | 41.9% | 36.4% | 49% | 1.5 | 1.6 |
+| Receiving yards | 3,078 | 51.9% | 46.7% | 48% | 19.1 | 21.0 |
 
 Count stats land exactly on the median often, so over and under do not add to 100%. Anytime TD: average predicted 17.7% vs 17.6% actual, Brier 0.1292 vs 0.1452 for a flat rate.
 
-Sportsbook prop lines are not in any free data source, so the site shows the model's fair line and probabilities rather than an edge against a book.
+**Usage shares.** Each player's share of targets and carries is weighted by how closely past games' lineups match this week's, and shares are concentrated slightly toward established starters (targets 1.15, carries 1.10) with 2% and 1% left for unlisted players. These were set on the 2024 backtest after it showed starters being under-projected (top receivers went over their median 60% of the time) and checked on 2025, where receiving catches and yards now average within 1% of actual and top receivers go over 48% of the time. Top running backs now lean slightly high on rushing yards (45% over, 55% under).
+
+**Kalshi props.** `src/kalshi_props.py` prices every open Kalshi NFL player prop (passing, rushing, receiving, rush + rec yards, attempts, completions, interceptions and the 1+/2+/3+ TD ladders) with the simulated distributions and computes the value of YES and NO after Kalshi's taker fee. The site lists contracts with 5 cents or more of value in a tight market and marks gaps of 15 cents or more "check news". Prices are logged every run to `data/kalshi_props_history.csv` so the edges can be graded once games are played.
 
 ## Run locally
 
