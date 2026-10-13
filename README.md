@@ -83,18 +83,22 @@ Walk-forward check on the 2025 regular season (weeks 3 to 18, every projection m
 
 | Market | Projections | Actual over median | Actual under median | In middle 50% (target 50%) | Error, model | Error, last-4 avg |
 |---|---|---|---|---|---|---|
-| Passing yards | 471 | 50.5% | 49.5% | 51% | 59.3 | 68.6 |
-| Completions | 471 | 44.6% | 50.1% | 48% | 4.7 | 5.7 |
-| Pass attempts | 471 | 43.7% | 50.3% | 46% | 6.8 | 8.1 |
-| Passing TDs | 471 | 36.7% | 33.3% | 57% | 0.9 | 1.0 |
-| Rushing yards | 1,422 | 54.4% | 42.8% | 50% | 19.4 | 20.5 |
-| Rush attempts | 1,422 | 50.6% | 36.5% | 50% | 3.1 | 3.2 |
-| Receptions | 3,078 | 41.9% | 36.4% | 49% | 1.5 | 1.6 |
-| Receiving yards | 3,078 | 51.9% | 46.7% | 48% | 19.1 | 21.0 |
+| Passing yards | 471 | 50.5% | 49.5% | 53% | 58.5 | 68.6 |
+| Completions | 471 | 45.6% | 47.6% | 50% | 4.7 | 5.7 |
+| Pass attempts | 471 | 45.4% | 50.1% | 46% | 6.7 | 8.1 |
+| Passing TDs | 471 | 36.1% | 33.3% | 58% | 0.9 | 1.0 |
+| Rushing yards | 1,485 | 56.3% | 40.9% | 48% | 19.2 | 20.4 |
+| Rush attempts | 1,485 | 52.7% | 33.9% | 48% | 3.2 | 3.2 |
+| Receptions | 3,218 | 42.3% | 35.1% | 49% | 1.4 | 1.5 |
+| Receiving yards | 3,218 | 52.7% | 45.2% | 48% | 18.7 | 20.7 |
 
-Count stats land exactly on the median often, so over and under do not add to 100%. Anytime TD: average predicted 17.7% vs 17.6% actual, Brier 0.1292 vs 0.1452 for a flat rate.
+Count stats land exactly on the median often, so over and under do not add to 100%. Anytime TD Brier 0.1256 vs 0.1410 for a flat rate.
 
 **Usage shares.** Each player's share of targets and carries is weighted by how closely past games' lineups match this week's, and shares are concentrated slightly toward established starters (targets 1.15, carries 1.10) with 2% and 1% left for unlisted players. These were set on the 2024 backtest after it showed starters being under-projected (top receivers went over their median 60% of the time) and checked on 2025, where receiving catches and yards now average within 1% of actual and top receivers go over 48% of the time. Top running backs now lean slightly high on rushing yards (45% over, 55% under).
+
+**Who plays.** Active players come from nflverse weekly rosters: anyone on the active roster with offensive history is included (players back from injured reserve, trades, returning starters), and anyone on injured reserve, the practice squad, cut or traded is excluded. Brand-new first-string players on the depth chart get position priors. Game-day inactives are used live (they post about 90 minutes before kickoff) but not in the backtest. On 2024 and 2025 this lowered the error on every market and the anytime-TD Brier (0.1306 to 0.1280 and 0.1297 to 0.1257).
+
+**Team volume.** Pass attempts and carries come from each team's recent volume, its pass rate over expected (nflfastR `xpass`, competitive situations), its tempo (seconds between snaps), the opponent's tempo and what the opponent's defense allows, plus the simulated margin. Pass attempt error fell from 6.95 to 6.90 (2024) and 6.76 to 6.67 (2025). Top running backs still lean slightly under (actual goes over their median about 54 to 57% of the time).
 
 **Kalshi props.** `src/kalshi_props.py` prices every open Kalshi NFL player prop (passing, rushing, receiving, rush + rec yards, attempts, completions, interceptions and the 1+/2+/3+ TD ladders) with the simulated distributions and computes the value of YES and NO after Kalshi's taker fee. The site lists contracts with 5 cents or more of value in a tight market and marks gaps of 15 cents or more "check news". Prices are logged every run to `data/kalshi_props_history.csv` so the edges can be graded once games are played.
 

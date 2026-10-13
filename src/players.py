@@ -130,3 +130,38 @@ if __name__ == "__main__":
     x = x.join(info.set_index("player_id").name)
     for c in ["pass_yds", "rush_yds", "rec_yds"]:
         print(x.sort_values(c).tail(3)[["name", c]].to_string())
+
+
+PACE_CACHE = ROOT / "data" / "team_pace.csv"
+
+
+def _season_pace(season: int) -> pd.DataFrame:
+    """Per team-game play-calling and tempo in competitive situations:
+    proe = actual dropback rate minus nflfastR's expected pass rate (xpass), early downs and late downs pooled
+    sec_per_play = median seconds between snaps within a drive (tempo)"""
+    p = pd.read_parquet(ROOT / "data" / "raw" / f"pbp_{season}.parquet",
+                        columns=["game_id", "posteam", "play_type", "qb_dropback", "xpass", "wp", "qtr",
+                                 "score_differential", "game_seconds_remaining", "fixed_drive", "down"])
+    p = p[p.play_type.isin(["pass", "run"]) & p.posteam.notna()]
+    neutral = p.wp.between(0.20, 0.80) | ((p.qtr <= 3) & (p.score_differential.abs() <= 14))
+    n = p[neutral & p.xpass.notna()]
+    proe = n.assign(oe=n.qb_dropback - n.xpass).groupby(["game_id", "posteam"]).agg(
+        proe=("oe", "mean"), xpass=("xpass", "mean"), neutral_plays=("oe", "size"))
+    q = p[neutral].sort_values(["game_id", "fixed_drive", "game_seconds_remaining"], ascending=[True, True, False])
+    q = q.assign(gap=-q.groupby(["game_id", "fixed_drive"]).game_seconds_remaining.diff())
+    q = q[(q.gap > 0) & (q.gap < 60)]
+    pace = q.groupby(["game_id", "posteam"]).gap.median().rename("sec_per_play")
+    out = proe.join(pace, how="outer").reset_index().rename(columns={"posteam": "team"})
+    out["season"] = season
+    return out
+
+
+def build_team_pace(current: int) -> pd.DataFrame:
+    old = pd.read_csv(PACE_CACHE) if PACE_CACHE.exists() else pd.DataFrame()
+    if len(old):
+        old = old[old.season < current]
+    have = set(old.season.unique()) if len(old) else set()
+    frames = [old] + [_season_pace(s) for s in range(FIRST, current + 1) if s not in have]
+    out = pd.concat(frames, ignore_index=True)
+    out.to_csv(PACE_CACHE, index=False)
+    return out

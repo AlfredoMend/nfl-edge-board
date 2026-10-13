@@ -44,8 +44,9 @@ def run(season: int, first_week: int = 3, last_week: int = 18, n_sims: int = 400
         cut = g.gameday
         pgh, tmh = pg[pg.gameday < cut], tm[tm.gameday < cut]
         inj = P.injury_status(season, g.week)
-        home = P.build_side(pgh, tmh, g.home_team, g.away_team, g.home_qb_id, inj, lg)
-        away = P.build_side(pgh, tmh, g.away_team, g.home_team, g.away_qb_id, inj, lg)
+        roster = P.load_roster(season, int(g.week)) if P.__dict__.get("USE_ROSTER", 1) else None
+        home = P.build_side(pgh, tmh, g.home_team, g.away_team, g.home_qb_id, inj, lg, roster, False)
+        away = P.build_side(pgh, tmh, g.away_team, g.home_team, g.away_qb_id, inj, lg, roster, False)
         b = bt.loc[g.game_id]
         sims = P.raw_samples({"pred_margin": b.pred_margin, "pred_total": b.pred_total}, home, away, vol, lg, n=n_sims)
         actual = pg[pg.game_id == g.game_id].set_index("player_id")
